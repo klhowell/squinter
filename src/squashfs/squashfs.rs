@@ -13,6 +13,7 @@ pub struct SquashFS<R> {
 }
 
 impl SquashFS<File> {
+    /// Open a filepath as a SquashFS
     pub fn open<P>(path: P) -> io::Result<Self>
     where P: AsRef<Path>
     {
@@ -21,6 +22,7 @@ impl SquashFS<File> {
 }
 
 impl<R: Read + Seek> SquashFS<R> {
+    /// Create a new SquashFS instance from the provided Reader
     pub fn new(mut r: R) -> io::Result<Self>
     {
         r.seek(SeekFrom::Start(0))?;
@@ -29,6 +31,9 @@ impl<R: Read + Seek> SquashFS<R> {
         Ok(SquashFS { md_reader, sb })
     }
 
+    /// Retrieve an iterator that walks the dirents within a directory specified by the given
+    /// path.
+    /// path must refer to an existing directory or this function returns an error.
     pub fn read_dir<P>(&mut self, path: P) -> io::Result<ReadDir<std::vec::IntoIter<metadata::DirTable>>>
     where P: AsRef<Path>
     {
@@ -49,6 +54,8 @@ impl<R: Read + Seek> SquashFS<R> {
         Ok(ReadDir::new(dir_tables.into_iter()))
     }
 
+    /// Retrieve an iterator that walks the dirents within a directory specified by the given
+    /// DirEntry.
     pub fn read_dir_entry(&mut self, dir_entry: &DirEntry) -> io::Result<ReadDir<std::vec::IntoIter<metadata::DirTable>>>
     {
         let inode = self.inode(dir_entry.inode_ref)?;
@@ -56,20 +63,25 @@ impl<R: Read + Seek> SquashFS<R> {
         Ok(ReadDir::new(dir_tables.into_iter()))
     }
 
+    /// Retrieve an iterator that walks the dirents within a directory specified by the given
+    /// Inode.
     pub fn read_dir_inode(&mut self, inode: &metadata::Inode) -> io::Result<ReadDir<std::vec::IntoIter<metadata::DirTable>>>
     {
         let dir_tables = metadata::DirTable::read_for_inode(&mut self.md_reader, &self.sb, inode)?;
         Ok(ReadDir::new(dir_tables.into_iter()))
     }
 
+    /// Create an IO reader for the contents of the files specified by the given Inode
     pub fn open_file_inode(&mut self, inode: &metadata::Inode, file_reader: R) -> io::Result<FileDataReader<R>> {
         Ok(FileDataReader::from_inode(file_reader, &mut self.md_reader, &self.sb, inode)?.unwrap())
     }
 
+    /// Retrieve the root Inode of the SquashFS
     pub fn root_inode(&mut self) -> io::Result<metadata::Inode> {
         metadata::Inode::read_at_ref(&mut self.md_reader, &self.sb, self.sb.root_inode)
     }
 
+    /// Retrieve the Inode specified by SquasFS metadata Entry Reference
     pub fn inode(&mut self, inode_ref: metadata::EntryReference) -> io::Result<metadata::Inode> {
         metadata::Inode::read_at_ref(&mut self.md_reader, &self.sb, inode_ref)
     }
