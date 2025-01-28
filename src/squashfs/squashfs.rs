@@ -2,6 +2,7 @@ use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Component, Path};
 
+use super::filedata::FileDataReader;
 use super::metadata::{self, CachingMetadataReader};
 use super::superblock::Superblock;
 
@@ -59,6 +60,10 @@ impl<R: Read + Seek> SquashFS<R> {
     {
         let dir_tables = metadata::DirTable::read_for_inode(&mut self.md_reader, &self.sb, inode)?;
         Ok(ReadDir::new(dir_tables.into_iter()))
+    }
+
+    pub fn open_file_inode(&mut self, inode: &metadata::Inode, file_reader: R) -> io::Result<FileDataReader<R>> {
+        Ok(FileDataReader::from_inode(file_reader, &mut self.md_reader, &self.sb, inode)?.unwrap())
     }
 
     pub fn root_inode(&mut self) -> io::Result<metadata::Inode> {
