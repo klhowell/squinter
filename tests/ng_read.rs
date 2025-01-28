@@ -62,8 +62,11 @@ fn compare_and_descend(
     for (ng, sq) in z {
         let ng = ng?;
         let sq_inode = sqfs.inode(sq.inode_ref())?;
-        // Compare the entry/inode info
+        // Compare the entry info
         assert_eq!(ng.name().unwrap(), sq.file_name());
+
+        // Compare the inode info
+        compare_inode(sqfs, &sq_inode, &ng)?;
 
         // If the inode represents a directory, recurse to compare the directory contents
         assert_eq!(sq_inode.is_dir(), ng.is_dir()?);
@@ -73,4 +76,19 @@ fn compare_and_descend(
         total += 1;
     }
     Ok(total)
+}
+
+fn compare_inode(sqfs: &mut squashfs::SquashFS<std::fs::File>,
+    sq: &squashfs::metadata::Inode, ng: &read::Node<'_>) -> anyhow::Result<()>
+{
+    assert_eq!(sq.inode_number(), ng.id());
+    assert_eq!(sq.mode(), ng.mode());
+    assert_eq!(sq.uid(&sqfs.id_table)?, ng.uid()?);
+    assert_eq!(sq.gid(&sqfs.id_table)?, ng.gid()?);
+    assert_eq!(sq.mtime(), ng.mtime());
+    // TODO: Extended attributes
+
+    // TODO: File Data
+
+    Ok(())
 }
