@@ -30,6 +30,7 @@ pub fn read_metadata_block<R>(r: &mut R, c: &Compressor, buf: &mut [u8]) -> io::
     //println!("Size = {}; Compressed = {}", size, compressed);
 
     if size > METADATA_BLOCK_SIZE {
+        eprintln!("Metadata block size too big -- {}", size);
         return Err(io::Error::from(io::ErrorKind::InvalidData));
     }
 
@@ -79,13 +80,13 @@ impl<R: Read + Seek> Read for CachingMetadataReader<R> {
         if self.cur_data.is_none() {
             let new_key = self.cur_pos;
             if let Some(d) = self.block_cache.remove(&new_key) {
-                //println!("Using cache ({})", new_key);
+                //eprintln!("Using cache ({})", new_key);
                 self.cur_pos += d.0 as u64;
                 self.cur_key = Some(new_key);
                 self.cur_data = Some(d);
                 self.cur_offset = 0;
             } else {
-                //println!("Using new read ({})", new_key);
+                //eprintln!("Using new read ({})", new_key);
                 if self.cur_pos != self.stream_pos {
                     self.inner.seek(SeekFrom::Start(self.cur_pos))?;
                     self.stream_pos = self.cur_pos;
@@ -104,7 +105,7 @@ impl<R: Read + Seek> Read for CachingMetadataReader<R> {
             let read_size = Read::read(&mut &d.1[self.cur_offset..], buf)?;
             self.cur_offset += read_size;
 
-            //println!("Read {}: Got {}; new offset {}/{}", buf.len(), read_size, self.cur_offset, d.len());
+            //eprintln!("Read {}: Got {}; new offset {}/{}", buf.len(), read_size, self.cur_offset, d.1.len());
 
             if self.cur_offset >= d.1.len() {
                 let cache_key = mem::take(&mut self.cur_key).unwrap();
@@ -127,7 +128,7 @@ impl<R: Read + Seek> Seek for CachingMetadataReader<R> {
             let cache_data = mem::take(&mut self.cur_data).unwrap();
             self.block_cache.insert(cache_key, cache_data);
         }
-        //println!("Seek: {:?}", pos);
+        //eprintln!("Seek: {:?}", pos);
         self.cur_pos = match pos {
             SeekFrom::Start(p) => p,
             SeekFrom::Current(p) => (self.cur_pos as i64 + p) as u64,
@@ -331,9 +332,9 @@ impl FromBytes for ExtendedAttributeLookupEntry {
     const BYTE_SIZE: u16 = 16;
     fn from_bytes(buf: &[u8]) -> Self {
         Self {
-            xattr_ref: u64::from_le_bytes(buf.try_into().unwrap()),
-            count: u32::from_le_bytes(buf[8..].try_into().unwrap()),
-            size: u32::from_le_bytes(buf[12..].try_into().unwrap()),
+            xattr_ref: u64::from_le_bytes(buf[0..8].try_into().unwrap()),
+            count: u32::from_le_bytes(buf[8..12].try_into().unwrap()),
+            size: u32::from_le_bytes(buf[12..16].try_into().unwrap()),
         }
     }
 }
@@ -378,6 +379,37 @@ impl<I: FromBytes> LookupTable<I> {
             data = &data[I::BYTE_SIZE as usize..];
         }
         Ok(me)
+    }
+}
+
+#[derive(Debug)]
+pub struct FragmentEntry {
+    pub start: u64,
+    pub size: u32,
+}
+
+impl FromBytes for FragmentEntry {
+    const BYTE_SIZE: u16 = 16;
+    fn from_bytes(buf: &[u8]) -> Self {
+        Self {
+            start: u64::from_le_bytes(buf[0..8].try_into().unwrap()),
+            size: u32::from_le_bytes(buf[8..12].try_into().unwrap()),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub struct FragmentLookupTable {
+    pub lu_table: LookupTable<FragmentEntry>,
+}
+
+impl FragmentLookupTable {
+    pub fn read<R>(r: &mut R, sb: &Superblock) -> io::Result<Self> 
+    where R: Read + Seek
+    {
+        Ok(Self {
+            lu_table: LookupTable::read(r, sb.frag_table, sb.frag_count as u32, &sb.compressor)?,
+        })
     }
 }
 
@@ -444,7 +476,7 @@ pub struct Inode {
     gid_index: u16,
     mtime: u32,
     inode_number: u32,
-    extended_info: InodeExtendedInfo,
+    pub extended_info: InodeExtendedInfo,
 }
 
 #[derive(Debug, IntoPrimitive, TryFromPrimitive)]
@@ -501,11 +533,11 @@ pub struct ExtDirInfo {
 
 #[derive(Debug)]
 pub struct BasicFileInfo {
-    blocks_start: u32,
-    frag_index: u32,
-    block_offset: u32,
-    file_size: u32,
-    block_sizes: Vec<u32>,
+    pub blocks_start: u32,
+    pub frag_index: u32,
+    pub block_offset: u32,
+    pub file_size: u32,
+    pub block_sizes: Vec<u32>,
 }
 
 
