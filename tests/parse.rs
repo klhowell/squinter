@@ -17,10 +17,16 @@ fn test_parse_all() -> io::Result<()> {
     println!("ID Table = {:?}", id_table);
 
     let export_table = metadata::ExportLookupTable::read(&mut f, &sb)?;
-    println!("Export Table = ({} Entries)", export_table.lu_table.entries.len());
+    match export_table {
+        Some(t) => println!("Export Table = ({} Entries)", t.lu_table.entries.len()),
+        None => println!("No export table"),
+    }
 
-    //let xattr_table = metadata::ExtendedAttributeLookupTable::read(&mut f, &sb)?;
-    //println!("XATTR Table = {:?}", xattr_table);
+    let xattr_table = metadata::ExtendedAttributeLookupTable::read(&mut f, &sb)?;
+    match xattr_table {
+        Some(t) => println!("XATTR Table = {:?}", t),
+        None => println!("No xattr table"),
+    }
 
     let mut buf: [u8; 8192] = [0; 8192];
     /*

@@ -434,12 +434,15 @@ pub struct ExportLookupTable {
 }
 
 impl ExportLookupTable {
-    pub fn read<R>(r: &mut R, sb: &Superblock) -> io::Result<Self> 
+    pub fn read<R>(r: &mut R, sb: &Superblock) -> io::Result<Option<Self>> 
     where R: Read + Seek
     {
-        Ok(Self {
+        if sb.export_table == u64::MAX {
+            return Ok(None)
+        }
+        Ok(Some(Self {
             lu_table: LookupTable::read(r, sb.export_table, sb.inode_count, &sb.compressor)?,
-        })
+        }))
     }
 }
 
@@ -451,20 +454,20 @@ pub struct ExtendedAttributeLookupTable {
 }
 
 impl ExtendedAttributeLookupTable {
-    pub fn read<R>(r: &mut R, sb: &Superblock) -> io::Result<Self> 
+    pub fn read<R>(r: &mut R, sb: &Superblock) -> io::Result<Option<Self>> 
     where R: Read + Seek
     {
         if sb.xattr_table == u64::MAX {
-            return Err(io::Error::from(io::ErrorKind::NotFound));
+            return Ok(None);
         }
         // Read the metadata block locations
         r.seek(SeekFrom::Start(sb.xattr_table))?;
         let kv_start = r.read_u64::<LittleEndian>()?;
         let count = r.read_u32::<LittleEndian>()?;
-        Ok(Self {
+        Ok(Some(Self {
             kv_start, count,
             lu_table: LookupTable::read(r, sb.xattr_table+16, count as u32, &sb.compressor)?,
-        })
+        }))
     }
 }
 
