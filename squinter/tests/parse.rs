@@ -3,12 +3,13 @@ use std::io::{self, Read};
 use std::io::{Seek, SeekFrom};
 use std::path::{PathBuf, Path};
 
-use squashfs_tools::squashfs::metadata::{self, InodeType, EntryReference};
-use squashfs_tools::squashfs::superblock::Superblock;
+use squinter::squashfs::metadata::{self, InodeType, EntryReference};
+use squinter::squashfs::superblock::Superblock;
 
 #[test]
+#[ignore = "requires manually provided squashfs"]
 fn test_parse_all() -> io::Result<()> {
-    let mut f = File::open("test_data/1.squashfs")?;
+    let mut f = File::open("../test_data/1.squashfs")?;
 
     let sb = Superblock::read(&mut f)?;
     println!("Superblock = {:?}", sb);
@@ -58,6 +59,7 @@ fn test_parse_all() -> io::Result<()> {
 }
 
 #[test]
+#[ignore = "requires manually provided squashfs"]
 fn test_list_all() -> io::Result<()> {
     let mut f = File::open("test_data/1.squashfs")?;
     let sb = Superblock::read(&mut f)?;
