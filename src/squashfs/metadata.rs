@@ -653,6 +653,11 @@ impl Inode {
     pub fn from_bytes(buf: &mut [u8], block_size: u32) -> Self {
         Self::read(&mut &buf[..], block_size).unwrap()
     }
+
+    pub fn is_dir(&self) -> bool {
+        matches!(self.inode_type, InodeType::BasicDir) ||
+        matches!(self.inode_type, InodeType::ExtDir)
+    }
 }
 
 #[derive(Debug)]
