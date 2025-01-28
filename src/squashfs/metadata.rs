@@ -735,7 +735,7 @@ impl Inode {
 pub struct DirTable {
     pub count: u32,
     pub start: u32,
-    pub inode_number: i32,
+    pub inode_number: u32,
     pub entries: Vec<DirEntry>,
 }
 
@@ -753,7 +753,7 @@ impl DirTable {
     {
         let count = r.read_u32::<LittleEndian>()? + 1;
         let start = r.read_u32::<LittleEndian>()?;
-        let inode_number = r.read_i32::<LittleEndian>()?;
+        let inode_number = r.read_u32::<LittleEndian>()?;
         let mut entries = Vec::with_capacity(count.try_into().unwrap());
         for _ in 0..count {
             let offset = r.read_u16::<LittleEndian>()?;

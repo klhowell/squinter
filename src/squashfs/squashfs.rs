@@ -97,12 +97,14 @@ impl<R: Read + Seek> SquashFS<R> {
 pub struct DirEntry {
     inner: metadata::DirEntry,
     inode_ref: metadata::EntryReference,
+    inode_num: u32,
 }
 
 impl DirEntry {
-    pub fn new(dt_start: u64, inner: metadata::DirEntry) -> Self {
+    pub fn new(dt_start: u64, dt_inode_num: u32, inner: metadata::DirEntry) -> Self {
         let inode_ref = metadata::EntryReference::new(dt_start, inner.offset);
-        Self { inner, inode_ref }
+        let inode_num = dt_inode_num.wrapping_add_signed(inner.inode_offset as i32);
+        Self { inner, inode_ref, inode_num }
     }
 
     pub fn file_name(&self) -> String {
@@ -111,6 +113,10 @@ impl DirEntry {
 
     pub fn inode_ref(&self) -> metadata::EntryReference {
         self.inode_ref
+    }
+
+    pub fn inode_num(&self) -> u32 {
+        self.inode_num
     }
 }
 
@@ -121,6 +127,7 @@ pub struct ReadDir<TI> {
     table_iter: TI,
     cur_iter: Option<std::vec::IntoIter<metadata::DirEntry>>,
     cur_start: u64,
+    cur_inode_num: u32,
 }
 
 impl<TI> ReadDir<TI>
@@ -128,7 +135,7 @@ where TI: Iterator<Item = metadata::DirTable>
 {
     fn new(table_iter: TI) -> Self
     {
-        ReadDir { table_iter, cur_iter: None, cur_start: 0 }
+        ReadDir { table_iter, cur_iter: None, cur_start: 0, cur_inode_num: 0 }
     }
 }
 
@@ -144,6 +151,7 @@ where TI: Iterator<Item = metadata::DirTable>
                     None => return None,
                     Some(t) => {
                         self.cur_start = t.start.into();
+                        self.cur_inode_num = t.inode_number.into();
                         self.cur_iter = Some(t.entries.into_iter());
                     }
                 }
@@ -151,7 +159,7 @@ where TI: Iterator<Item = metadata::DirTable>
             match &mut self.cur_iter {
                 Some(i) => {
                     match i.next() {
-                        Some(e) => return Some(DirEntry::new(self.cur_start, e)),
+                        Some(e) => return Some(DirEntry::new(self.cur_start, self.cur_inode_num, e)),
                         None => {
                             self.cur_iter = None;
                             self.cur_start = 0;
