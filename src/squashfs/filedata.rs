@@ -16,6 +16,8 @@ struct FileBlockInfo {
     is_compressed: bool,
 }
 
+// TODO: TailEnd support
+#[allow(dead_code)]
 struct TailEnd {
     fragment: FragmentEntry,
     offset: u32,
@@ -41,9 +43,10 @@ pub struct FileDataReader<R> {
 }
 
 impl<R: Read + Seek> FileDataReader<R> {
-    pub fn from_inode<MDR>(mut inner: R, md_reader: &mut MDR, sb: &Superblock, inode: &Inode) -> io::Result<Option<Self>>
+    pub fn from_inode<MDR>(mut inner: R, _md_reader: &mut MDR, sb: &Superblock, inode: &Inode) -> io::Result<Option<Self>>
     where MDR: Read + Seek
     {
+        // TODO: What was md_reader intended for?
         let pos = 0;
         let comp = sb.compressor;
         let block_size = sb.block_size;
@@ -105,10 +108,6 @@ impl<R: Read + Seek> FileDataReader<R> {
 
         let b: &FileBlockInfo = &self.blocks[block_index as usize];
         Some((&b, b.data_offset + data_offset, b.data_len - data_offset))
-    }
-
-    fn get_pos(&self) -> Option<u64> {
-        Some(self.pos)
     }
 
     /// Do whatever is necessary to make the inner reader's next read come from self.pos
@@ -211,6 +210,7 @@ enum InnerReader<R> {
     Gzip(Take<ZlibDecoder<Take<R>>>),
 }
 
+#[allow(dead_code)]
 impl<R> InnerReader<R> {
     pub fn into_inner(self) -> R {
         match self {

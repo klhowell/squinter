@@ -190,12 +190,11 @@ impl<R: Read> Read for InnerReader<R> {
 pub struct MetadataReader<R> {
     inner: InnerReader<R>,
     comp: Compressor,
-    pos: usize,
 }
 
 impl<R: Read + Seek> MetadataReader<R> {
     pub fn new(inner: R, comp: Compressor) -> MetadataReader<R> {
-        MetadataReader { inner: InnerReader::Base(inner), comp, pos: 0 }
+        MetadataReader { inner: InnerReader::Base(inner), comp }
     }
 
     pub fn into_inner(self) -> R {
@@ -540,22 +539,22 @@ pub enum InodeExtendedInfo {
 
 #[derive(Debug)]
 pub struct BasicDirInfo {
-    block_index: u32,
-    link_count: u32,
-    file_size: u16,
-    block_offset: u16,
-    parent_inode: u32,
+    pub block_index: u32,
+    pub link_count: u32,
+    pub file_size: u16,
+    pub block_offset: u16,
+    pub parent_inode: u32,
 }
 
 #[derive(Debug)]
 pub struct ExtDirInfo {
-    link_count: u32,
-    file_size: u32,
-    block_index: u32,
-    parent_inode: u32,
-    index_count: u16,
-    block_offset: u16,
-    xattr_index: u32,
+    pub link_count: u32,
+    pub file_size: u32,
+    pub block_index: u32,
+    pub parent_inode: u32,
+    pub index_count: u16,
+    pub block_offset: u16,
+    pub xattr_index: u32,
 }
 
 #[derive(Debug)]
@@ -570,19 +569,19 @@ pub struct BasicFileInfo {
 
 #[derive(Debug)]
 pub struct BasicSymlinkInfo {
-    link_count: u32,
-    target_path: CString,
+    pub link_count: u32,
+    pub target_path: CString,
 }
 
 #[derive(Debug)]
 pub struct BasicDevInfo {
-    link_count: u32,
-    dev_number: u32,
+    pub link_count: u32,
+    pub dev_number: u32,
 }
 
 #[derive(Debug)]
 pub struct BasicIpcInfo {
-    link_count: u32,
+    pub link_count: u32,
 }
 
 impl Inode {
