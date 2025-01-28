@@ -3,7 +3,7 @@ use anyhow;
 use criterion::{criterion_group, criterion_main, Criterion};
 
 use squashfs_ng::read;
-use squashfs_tools::squashfs;
+use squinter::squashfs;
 const TEST_ARCHIVE: &str = "test_data/1.squashfs";
 
 fn read_root_sqfs() -> anyhow::Result<usize> {
@@ -15,7 +15,7 @@ fn read_root_sqfs() -> anyhow::Result<usize> {
 }
 
 fn read_root_ng() -> anyhow::Result<usize> {
-    let archive = read::Archive::new(TEST_ARCHIVE)?;
+    let archive = read::Archive::open(TEST_ARCHIVE)?;
     let root_count = archive.get_exists("/")?.into_owned_dir()?
         .count();
 
@@ -30,7 +30,7 @@ fn read_tree_sqfs() -> anyhow::Result<u32> {
 }
 
 fn read_tree_ng() -> anyhow::Result<u32> {
-    let archive = read::Archive::new(TEST_ARCHIVE)?;
+    let archive = read::Archive::open(TEST_ARCHIVE)?;
     let archive_rootnode = archive.get_exists("/")?;
     let total = read_and_descend_ng(&archive, archive_rootnode)?;
     Ok(total)
