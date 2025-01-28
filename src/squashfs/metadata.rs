@@ -14,12 +14,17 @@ use super::superblock::{Compressor, Superblock};
 
 //let block_count = (item_count + (METADATA_BLOCK_SIZE / I::BYTE_SIZE) as u32 - 1) / (METADATA_BLOCK_SIZE / I::BYTE_SIZE) as u32;
 
+// Divide x by y, rounding up any fractional result
 macro_rules! div_ceil {
     ($x:expr, $y:expr) => { ($x + $y - 1) / $y }
 }
 
+// SquashFS Metadata block size is fixed by the specification
 const METADATA_BLOCK_SIZE: u16 = 8192;
 
+// Read and decompress a single metadata block from the provided Reader into the provided buffer.
+// Metadata blocks are always 8KB. If a smaller buffer is provided then only part of the block is
+// read and the ending Reader position is undefined.
 pub fn read_metadata_block<R>(r: &mut R, c: &Compressor, buf: &mut [u8]) -> io::Result<(usize, usize)>
     where R: Read
 {
@@ -55,6 +60,24 @@ pub fn read_metadata_block<R>(r: &mut R, c: &Compressor, buf: &mut [u8]) -> io::
     }
 }
 
+// This is a reader that wraps the Reader for a backing-store of compressed metadata blocks,
+// providing a more convenient interface for reading metadata. When the user first reads data from
+// a new metadata block, the entire compressed block is immediately fully read and decompressed. To
+// reduce repeated work, each decompressed block is placed in a cache which bypasses the
+// read/decompress if the block is needed again in the future.
+//
+// Due to the SquashFS format using compressed offsets to specify metadata locations, the Reader
+// position is handled in a non-standard way. Seek operations refer to compressed addresses, and
+// it is expected that seeks will always refer to the beginning of a metadata block -- ie, since the
+// reader has no way of knowing the boundaries of compressed metadata blocks, the user must
+// provide them via the seek() call. seek() cannot currently be used to navigate within a metadata
+// block -- unneeded data must be read and discarded.
+//
+// Once an initial metablock location has been established, the user may continue reading across
+// multiple blocks with the CachingMetadataReader silently decompressing each new block as needed.
+// If a user read is large enough to bridge across a block boundary then the Reader will return a
+// short read up until the end of the current block, and the user must call read a second time to
+// retrieve the next block's data.
 #[derive(Debug)]
 pub struct CachingMetadataReader<R> {
     inner: R,                                       // Backing reader on the compressed stream

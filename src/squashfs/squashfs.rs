@@ -86,12 +86,14 @@ impl<R: Read + Seek> SquashFS<R> {
         metadata::Inode::read_at_ref(&mut self.md_reader, &self.sb, self.sb.root_inode)
     }
 
-    /// Retrieve the Inode specified by SquasFS metadata Entry Reference
+    /// Retrieve the Inode specified by SquashFS metadata Entry Reference
     pub fn inode(&mut self, inode_ref: metadata::EntryReference) -> io::Result<metadata::Inode> {
         metadata::Inode::read_at_ref(&mut self.md_reader, &self.sb, inode_ref)
     }
 }
 
+// A DirEntry, like in std::fs, represents a named inode-reference within a directory. For example, a filename
+// together with a reference to the file's inode.
 pub struct DirEntry {
     inner: metadata::DirEntry,
     inode_ref: metadata::EntryReference,
@@ -112,6 +114,9 @@ impl DirEntry {
     }
 }
 
+// An iterator over the individual DirEntries in a list of DirEntry runs. The SquashFS filesystem
+// potentially splits the DirEntries for a directory table across multiple runs, so this object must
+// combine walking of both runs and entries into the next() Iterator function.
 pub struct ReadDir<TI> {
     table_iter: TI,
     cur_iter: Option<std::vec::IntoIter<metadata::DirEntry>>,
