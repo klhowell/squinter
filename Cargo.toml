@@ -3,11 +3,14 @@ name = "squashfs-tools"
 version = "0.1.0"
 edition = "2021"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[[bench]]
+name = "squashfs_read"
+harness = false
 
 [dev-dependencies]
 squashfs-ng = "0.1.2"
 anyhow = "1.0.75"
+criterion = "0.5"
 
 [dependencies]
 bitflags = "1.3"
