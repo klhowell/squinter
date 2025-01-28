@@ -1,3 +1,6 @@
+// See https://dr-emann.github.io/squashfs/squashfs.html
+// for details on the SquashFS binary format
+
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Component, Path};

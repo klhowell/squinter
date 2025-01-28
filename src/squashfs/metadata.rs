@@ -57,14 +57,14 @@ pub fn read_metadata_block<R>(r: &mut R, c: &Compressor, buf: &mut [u8]) -> io::
 
 #[derive(Debug)]
 pub struct CachingMetadataReader<R> {
-    inner: R,
-    cur_pos: u64,
-    stream_pos: u64,
-    comp: Compressor,
-    block_cache: HashMap<u64, (usize, Vec<u8>)>,
-    cur_key: Option<u64>,
-    cur_data: Option<(usize, Vec<u8>)>,
-    cur_offset: usize,
+    inner: R,                                       // Backing reader on the compressed stream
+    cur_pos: u64,                                   // Virtual seek offset within the *compressed* stream
+    stream_pos: u64,                                // Actual seek position of backing reader
+    comp: Compressor,                               // What compressor to use to decompress compressed blocks
+    block_cache: HashMap<u64, (usize, Vec<u8>)>,    // Map of compressed block offsets to their uncompressed data
+    cur_key: Option<u64>,                           // Key used to obtain currently possessed cache block
+    cur_data: Option<(usize, Vec<u8>)>,             // Currently possessed cache block
+    cur_offset: usize,                              // Read offset within possessed cache block
 }
 
 impl<R:Read + Seek> CachingMetadataReader<R> {
@@ -124,6 +124,7 @@ impl<R: Read + Seek> Read for CachingMetadataReader<R> {
 impl<R: Read + Seek> Seek for CachingMetadataReader<R> {
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
         if self.cur_data.is_some() {
+            // Deposit the current data block in the cache
             let cache_key = mem::take(&mut self.cur_key).unwrap();
             let cache_data = mem::take(&mut self.cur_data).unwrap();
             self.block_cache.insert(cache_key, cache_data);
