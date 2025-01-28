@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 use clap::Parser;
 
 use squashfs_tools::squashfs::{DirEntry, SquashFS};
-use squashfs_tools::squashfs::metadata;
 
 #[derive(Parser, Debug)]
 struct Args {
@@ -67,7 +66,7 @@ fn print_and_descend_dir(sqfs: &mut SquashFS<File>, files: &Vec<PathBuf>, parent
     println!("{}", path.to_str().unwrap());
 
     let inode = sqfs.inode(d.inode_ref())?;
-    if matches!(inode.inode_type, metadata::InodeType::BasicDir) {
+    if inode.is_dir() {
         for d in sqfs.read_dir_inode(&inode)? {
             print_and_descend_dir(sqfs, files, &path, &d)?;
         }
@@ -77,7 +76,6 @@ fn print_and_descend_dir(sqfs: &mut SquashFS<File>, files: &Vec<PathBuf>, parent
 
 fn cat_files(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     let mut sqfs = SquashFS::open(&args.filesystem)?;
-    let mut file_reader = File::open(&args.filesystem)?;
 
     let file_list = if args.files.is_empty() {
         vec![args.dir.clone()]
@@ -89,35 +87,31 @@ fn cat_files(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
 
     let root_inode = sqfs.root_inode()?;
     for d in sqfs.read_dir_inode(&root_inode)? {
-        file_reader = cat_and_descend_dir(&mut sqfs, file_reader, &file_list, &args.dir, &d)?;
+        cat_and_descend_dir(&mut sqfs, &file_list, &args.dir, &d)?;
     }
     Ok(())
 }
 
-fn cat_and_descend_dir(sqfs: &mut SquashFS<File>, mut file_reader: File, files: &Vec<PathBuf>, parent: &Path, d: &DirEntry) -> Result<File, Box<dyn std::error::Error>> {
+fn cat_and_descend_dir(sqfs: &mut SquashFS<File>, files: &Vec<PathBuf>, parent: &Path, d: &DirEntry) -> Result<(), Box<dyn std::error::Error>> {
     let path = parent.join(d.file_name());
 
     if !files.iter().any(|p| path.starts_with(p) || p.starts_with(&path)) {
-        return Ok(file_reader);
+        return Ok(());
     }
 
     let inode = sqfs.inode(d.inode_ref())?;
-    match inode.inode_type {
-        metadata::InodeType::BasicFile => {
-            //eprintln!("File -> {}", path.to_str().unwrap());
-            let mut r = sqfs.open_file_inode(&inode, file_reader)?;
-            let stdout = io::stdout();
-            let mut stdout = stdout.lock();
-            io::copy(&mut r, &mut stdout)?;
-            file_reader = r.into_inner();
-        },
-        metadata::InodeType::BasicDir => {
-            //eprintln!("Dir -> {}", path.to_str().unwrap());
-            for d in sqfs.read_dir_inode(&inode)? {
-                file_reader = cat_and_descend_dir(sqfs, file_reader, files, &path, &d)?;
-            }
-        },
-        _ => (),
+    if inode.is_file() {
+        //eprintln!("File -> {}", path.to_str().unwrap());
+        let mut r = sqfs.open_file_inode(&inode)?;
+        let stdout = io::stdout();
+        let mut stdout = stdout.lock();
+        io::copy(&mut r, &mut stdout)?;
     }
-    Ok(file_reader)
+    if inode.is_dir() {
+        //eprintln!("Dir -> {}", path.to_str().unwrap());
+        for d in sqfs.read_dir_inode(&inode)? {
+            cat_and_descend_dir(sqfs, files, &path, &d)?;
+        }
+    }
+    Ok(())
 }

@@ -680,6 +680,11 @@ impl Inode {
         Self::read(&mut &buf[..], block_size).unwrap()
     }
 
+    pub fn is_file(&self) -> bool {
+        matches!(self.inode_type, InodeType::BasicFile) ||
+        matches!(self.inode_type, InodeType::ExtFile)
+    }
+
     pub fn is_dir(&self) -> bool {
         matches!(self.inode_type, InodeType::BasicDir) ||
         matches!(self.inode_type, InodeType::ExtDir)
