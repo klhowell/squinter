@@ -1,0 +1,25 @@
+[package]
+name = "squinter"
+description = "Library to interface with SquashFS filesystems"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[[bench]]
+name = "squashfs_read"
+harness = false
+
+[dev-dependencies]
+squashfs-ng = "0.1.2"
+anyhow = "1.0.75"
+criterion = "0.5"
+
+[dependencies]
+bitflags = "1.3"
+byteorder = "1"
+flate2 = "1.0"
+num_enum = "0.5"

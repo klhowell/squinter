@@ -1,0 +1,14 @@
+[package]
+name = "squinter-cli"
+description = "Command-line tools using the squinter SquashFS interface library"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+repository.workspace = true
+license.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+clap = { version = "3.2", features = ["derive"] }
+squinter = { path = "../squinter" }

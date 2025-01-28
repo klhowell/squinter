@@ -3,8 +3,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use clap::Parser;
-
-use squashfs_tools::squashfs::{DirEntry, SquashFS};
+use squinter::squashfs::{DirEntry, SquashFS};
 
 #[derive(Parser, Debug)]
 struct Args {
