@@ -658,6 +658,50 @@ impl Inode {
         matches!(self.inode_type, InodeType::BasicDir) ||
         matches!(self.inode_type, InodeType::ExtDir)
     }
+
+    pub fn inode_number(&self) -> u32 {
+        self.inode_number
+    }
+
+    pub fn permissions(&self) -> u16 {
+        self.permissions
+    }
+
+    pub fn mode(&self) -> u16 {
+        let mut mode = self.permissions;
+        mode |= match self.inode_type {
+            InodeType::BasicBlockDev |
+            InodeType::ExtBlockDev => 0o60000,
+            InodeType::BasicCharDev |
+            InodeType::ExtCharDev => 0o20000,
+            InodeType::BasicDir |
+            InodeType::ExtDir => 0o40000,
+            InodeType::BasicFile |
+            InodeType::ExtFile => 0o100000,
+            InodeType::BasicNamedPipe |
+            InodeType::ExtNamedPipe => 0o10000,
+            InodeType::BasicSocked |
+            InodeType::ExtSocked => 0o140000,
+            InodeType::BasicSymlink |
+            InodeType::ExtSymlink => 0o120000,
+            InodeType::Unknown => 0,
+        };
+        mode
+    }
+
+    pub fn uid(&self, id_table: &IdLookupTable) -> io::Result<u32> {
+        id_table.lu_table.entries.get(self.uid_index as usize).cloned()
+        .ok_or(io::Error::from(io::ErrorKind::NotFound))
+    }
+
+    pub fn gid(&self, id_table: &IdLookupTable) -> io::Result<u32> {
+        id_table.lu_table.entries.get(self.gid_index as usize).cloned()
+        .ok_or(io::Error::from(io::ErrorKind::NotFound))
+    }
+
+    pub fn mtime(&self) -> u32 {
+        self.mtime
+    }
 }
 
 #[derive(Debug)]

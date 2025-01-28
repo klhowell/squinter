@@ -10,6 +10,7 @@ use super::superblock::Superblock;
 pub struct SquashFS<R> {
     md_reader: CachingMetadataReader<R>,
     sb: Superblock,
+    pub id_table: metadata::IdLookupTable,
 }
 
 impl SquashFS<File> {
@@ -27,8 +28,9 @@ impl<R: Read + Seek> SquashFS<R> {
     {
         r.seek(SeekFrom::Start(0))?;
         let sb = Superblock::read(&mut r)?;
+        let id_table = metadata::IdLookupTable::read(&mut r, &sb)?;
         let md_reader = CachingMetadataReader::new(r, sb.compressor);
-        Ok(SquashFS { md_reader, sb })
+        Ok(SquashFS { md_reader, sb, id_table })
     }
 
     /// Retrieve an iterator that walks the dirents within a directory specified by the given
