@@ -117,6 +117,7 @@ mod tests {
     use std::fs::File;
 
     #[test]
+    #[ignore = "requires manually provided squashfs"]
     fn test_read_superblock() -> io::Result<()> {
         let mut f = File::open("test_data/1.squashfs")?;
 

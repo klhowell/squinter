@@ -46,19 +46,7 @@ impl<R: Read + Seek> SquashFS<R> {
     pub fn read_dir<P>(&mut self, path: P) -> io::Result<ReadDir<std::vec::IntoIter<metadata::DirTable>>>
     where P: AsRef<Path>
     {
-        let mut inode = self.root_inode()?;
-        for comp in path.as_ref().components() {
-            inode = match comp {
-                Component::RootDir => self.root_inode()?,
-                Component::Normal(n) => {
-                    self.read_dir_inode(&inode)?.find(|e| n == e.file_name().as_str())
-                        .map(|e| self.inode(e.inode_ref()).ok())
-                        .flatten()
-                        .ok_or(io::Error::from(io::ErrorKind::NotFound))?
-                },
-                _ => { return Err(io::Error::new(io::ErrorKind::InvalidData, "Error parsing filepath"))}
-            };
-        }
+        let inode = self.inode_from_path(path)?;
         let dir_tables = metadata::DirTable::read_for_inode(&mut self.md_reader, &self.sb, &inode)?;
         Ok(ReadDir::new(dir_tables.into_iter()))
     }
@@ -67,7 +55,7 @@ impl<R: Read + Seek> SquashFS<R> {
     /// DirEntry.
     pub fn read_dir_entry(&mut self, dir_entry: &DirEntry) -> io::Result<ReadDir<std::vec::IntoIter<metadata::DirTable>>>
     {
-        let inode = self.inode(dir_entry.inode_ref)?;
+        let inode = self.inode_from_entry(dir_entry.inode_ref)?;
         let dir_tables = metadata::DirTable::read_for_inode(&mut self.md_reader, &self.sb, &inode)?;
         Ok(ReadDir::new(dir_tables.into_iter()))
     }
@@ -78,6 +66,15 @@ impl<R: Read + Seek> SquashFS<R> {
     {
         let dir_tables = metadata::DirTable::read_for_inode(&mut self.md_reader, &self.sb, inode)?;
         Ok(ReadDir::new(dir_tables.into_iter()))
+    }
+
+    /// Create an IO reader for the contents of the files specified by the given path
+    pub fn open_file<P>(&mut self, path: P) -> io::Result<FileDataReader<ReaderClient<R>>>
+    where P: AsRef<Path>
+    {
+        let inode = self.inode_from_path(path)?;
+        let reader = self.reader_mux.client();
+        Ok(FileDataReader::from_inode(reader, &mut self.md_reader, &self.sb, &inode)?.unwrap())
     }
 
     /// Create an IO reader for the contents of the files specified by the given Inode
@@ -92,8 +89,27 @@ impl<R: Read + Seek> SquashFS<R> {
     }
 
     /// Retrieve the Inode specified by SquashFS metadata Entry Reference
-    pub fn inode(&mut self, inode_ref: metadata::EntryReference) -> io::Result<metadata::Inode> {
+    pub fn inode_from_entry(&mut self, inode_ref: metadata::EntryReference) -> io::Result<metadata::Inode> {
         metadata::Inode::read_at_ref(&mut self.md_reader, &self.sb, inode_ref)
+    }
+
+    pub fn inode_from_path<P>(&mut self, path: P) -> io::Result<metadata::Inode>
+    where P: AsRef<Path>
+    {
+        let mut inode = self.root_inode()?;
+        for comp in path.as_ref().components() {
+            inode = match comp {
+                Component::RootDir => self.root_inode()?,
+                Component::Normal(n) => {
+                    self.read_dir_inode(&inode)?.find(|e| n == e.file_name().as_str())
+                        .map(|e| self.inode_from_entry(e.inode_ref()).ok())
+                        .flatten()
+                        .ok_or(io::Error::from(io::ErrorKind::NotFound))?
+                },
+                _ => { return Err(io::Error::new(io::ErrorKind::InvalidData, "Error parsing filepath"))}
+            };
+        }
+        Ok(inode)
     }
 }
 

@@ -1,5 +1,5 @@
 use std::time::Duration;
-use std::io::{Read, Seek};
+use std::io::{Read, Seek, BufReader};
 use std::path::Path;
 
 use anyhow;
@@ -58,7 +58,11 @@ fn read_and_descend_sqfs(sqfs: &mut squashfs::SquashFS<std::fs::File>, sq_inode:
 
     let mut total = 0;
     for de in sqfs_dir {
-        let sq_inode = sqfs.inode(de.inode_ref())?;
+        let sq_inode = sqfs.inode_from_entry(de.inode_ref())?;
+        if sq_inode.is_file() {
+            let mut sq_reader = BufReader::new(sqfs.open_file_inode(&sq_inode)?);
+            std::io::copy(&mut sq_reader, &mut std::io::sink())?;
+        }
         // If the inode represents a directory, recurse to the directory contents
         if sq_inode.is_dir() {
             total += read_and_descend_sqfs(sqfs, &sq_inode)?;
@@ -78,6 +82,10 @@ fn read_and_descend_ng(archive: &read::Archive, ng_inode: read::Node<'_>)
     let mut total = 0;
     for r in archive_dir {
         let node = r?;
+        if node.is_file()? {
+            let mut ng_reader = BufReader::new(node.as_file()?);
+            std::io::copy(&mut ng_reader, &mut std::io::sink())?;
+        }
         // If the inode represents a directory, recurse to compare the directory contents
         if node.is_dir()? {
             total += read_and_descend_ng(&archive, node)?;
@@ -100,8 +108,11 @@ fn tree_benchmark(c: &mut Criterion) {
     prepare_test_files().unwrap();
     for comp in COMPRESSION_METHODS {
         let test_file = format!("{TEST_DATA_DIR}/test.{comp}.squashfs");
-        c.bench_function(&format!("{comp} - Sq Read Tree"), |b| b.iter(|| read_tree_sqfs(&test_file)));
-        c.bench_function(&format!("{comp} - Ng Read Tree"), |b| b.iter(|| read_tree_ng(&test_file)));
+        let mut group = c.benchmark_group("full-filesystem-read");
+        group.sample_size(20);
+        group.bench_function(&format!("{comp} - Sq Read Tree"), |b| b.iter(|| read_tree_sqfs(&test_file)));
+        group.bench_function(&format!("{comp} - Ng Read Tree"), |b| b.iter(|| read_tree_ng(&test_file)));
+        group.finish();
     }
 }
 

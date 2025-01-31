@@ -1,7 +1,7 @@
 /// These tests compare results from this crate to similar operations performed with libsquashfs
 /// from squashfs-tools-ng. libsquashfs APIs are accessed via the squashfs_ng crate.
 use std::time::Duration;
-use std::io::{Read, Seek};
+use std::io::{Read, Seek, BufReader};
 use std::path::Path;
 use std::iter;
 
@@ -76,7 +76,7 @@ fn compare_and_descend(
     let z = iter::zip(archive_dir, sqfs_dir);
     for (ng, sq) in z {
         let ng = ng?;
-        let sq_inode = sqfs.inode(sq.inode_ref())?;
+        let sq_inode = sqfs.inode_from_entry(sq.inode_ref())?;
         // Compare the entry info
         assert_eq!(ng.name().unwrap(), sq.file_name());
 
@@ -103,7 +103,13 @@ fn compare_inode(sqfs: &mut squashfs::SquashFS<std::fs::File>,
     assert_eq!(sq.mtime(), ng.mtime());
     // TODO: Extended attributes
 
-    // TODO: File Data
+    assert_eq!(sq.is_file(), ng.is_file()?);
+    if sq.is_file() {
+        let sq_reader = BufReader::new(sqfs.open_file_inode(sq)?);
+        let ng_reader = BufReader::new(ng.as_file()?);
+        assert!(ng_reader.bytes().zip(sq_reader.bytes())
+            .all(|(a, b)| a.unwrap() == b.unwrap()))
+    }
 
     Ok(())
 }
