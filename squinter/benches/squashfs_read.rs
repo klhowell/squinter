@@ -35,21 +35,21 @@ fn read_root_ng(test_file: &str) -> anyhow::Result<usize> {
     Ok(root_count)
 }
 
-fn read_tree_sqfs(test_file: &str) -> anyhow::Result<u32> {
+fn read_tree_sqfs(test_file: &str, content: bool) -> anyhow::Result<u32> {
     let mut sqfs = squashfs::SquashFS::open(test_file)?;
     let sqfs_rootnode = sqfs.root_inode()?;
-    let total = read_and_descend_sqfs(&mut sqfs, &sqfs_rootnode)?;
+    let total = read_and_descend_sqfs(&mut sqfs, &sqfs_rootnode, content)?;
     Ok(total)
 }
 
-fn read_tree_ng(test_file: &str) -> anyhow::Result<u32> {
+fn read_tree_ng(test_file: &str, content: bool) -> anyhow::Result<u32> {
     let archive = read::Archive::open(test_file)?;
     let archive_rootnode = archive.get_exists("/")?;
-    let total = read_and_descend_ng(&archive, archive_rootnode)?;
+    let total = read_and_descend_ng(&archive, archive_rootnode, content)?;
     Ok(total)
 }
 
-fn read_and_descend_sqfs(sqfs: &mut squashfs::SquashFS<std::fs::File>, sq_inode: &squashfs::metadata::Inode)
+fn read_and_descend_sqfs(sqfs: &mut squashfs::SquashFS<std::fs::File>, sq_inode: &squashfs::metadata::Inode, content: bool)
     -> anyhow::Result<u32>
 {
     assert!(sq_inode.is_dir());
@@ -59,20 +59,20 @@ fn read_and_descend_sqfs(sqfs: &mut squashfs::SquashFS<std::fs::File>, sq_inode:
     let mut total = 0;
     for de in sqfs_dir {
         let sq_inode = sqfs.inode_from_entry(de.inode_ref())?;
-        if sq_inode.is_file() {
+        if content && sq_inode.is_file() {
             let mut sq_reader = BufReader::new(sqfs.open_file_inode(&sq_inode)?);
             std::io::copy(&mut sq_reader, &mut std::io::sink())?;
         }
         // If the inode represents a directory, recurse to the directory contents
         if sq_inode.is_dir() {
-            total += read_and_descend_sqfs(sqfs, &sq_inode)?;
+            total += read_and_descend_sqfs(sqfs, &sq_inode, content)?;
         }
         total += 1;
     }
     Ok(total)
 }
 
-fn read_and_descend_ng(archive: &read::Archive, ng_inode: read::Node<'_>)
+fn read_and_descend_ng(archive: &read::Archive, ng_inode: read::Node<'_>, content: bool)
     -> anyhow::Result<u32>
 {
     assert!(ng_inode.is_dir()?);
@@ -82,13 +82,13 @@ fn read_and_descend_ng(archive: &read::Archive, ng_inode: read::Node<'_>)
     let mut total = 0;
     for r in archive_dir {
         let node = r?;
-        if node.is_file()? {
+        if content && node.is_file()? {
             let mut ng_reader = BufReader::new(node.as_file()?);
             std::io::copy(&mut ng_reader, &mut std::io::sink())?;
         }
         // If the inode represents a directory, recurse to compare the directory contents
         if node.is_dir()? {
-            total += read_and_descend_ng(&archive, node)?;
+            total += read_and_descend_ng(&archive, node, content)?;
         }
         total += 1;
     }
@@ -108,15 +108,27 @@ fn tree_benchmark(c: &mut Criterion) {
     prepare_test_files().unwrap();
     for comp in COMPRESSION_METHODS {
         let test_file = format!("{TEST_DATA_DIR}/test.{comp}.squashfs");
-        let mut group = c.benchmark_group("full-filesystem-read");
-        group.sample_size(20);
-        group.bench_function(&format!("{comp} - Sq Read Tree"), |b| b.iter(|| read_tree_sqfs(&test_file)));
-        group.bench_function(&format!("{comp} - Ng Read Tree"), |b| b.iter(|| read_tree_ng(&test_file)));
+        let mut group = c.benchmark_group("full-tree-read");
+        group.sample_size(100);
+        group.bench_function(&format!("{comp} - Sq Read Tree"), |b| b.iter(|| read_tree_sqfs(&test_file, false)));
+        group.bench_function(&format!("{comp} - Ng Read Tree"), |b| b.iter(|| read_tree_ng(&test_file, false)));
         group.finish();
     }
 }
 
-criterion_group!(benches, root_benchmark, tree_benchmark);
+fn data_benchmark(c: &mut Criterion) {
+    prepare_test_files().unwrap();
+    for comp in COMPRESSION_METHODS {
+        let test_file = format!("{TEST_DATA_DIR}/test.{comp}.squashfs");
+        let mut group = c.benchmark_group("full-data-read");
+        group.sample_size(20);
+        group.bench_function(&format!("{comp} - Sq Read Content"), |b| b.iter(|| read_tree_sqfs(&test_file, true)));
+        group.bench_function(&format!("{comp} - Ng Read Content"), |b| b.iter(|| read_tree_ng(&test_file, true)));
+        group.finish();
+    }
+}
+
+criterion_group!(benches, root_benchmark, tree_benchmark, data_benchmark);
 criterion_main!(benches);
 
 fn prepare_test_files() -> std::io::Result<()> {
