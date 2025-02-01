@@ -22,9 +22,13 @@ squinter = "0.1.0"
 ```rust
 use squinter::squashfs::SquashFS;
 fn print_file_from_squashfs() {
+    // Open the SquashFS
     let sqfs = SquashFS::open("rootfs.squashfs")?;
+
+    // Open a file to read its contents
     let file_reader = sqfs.open_file("/etc/group")?;
     
+    // Copy the file contents to stdout
     let mut stdout = io::stdout().lock();
     io::copy(&mut file_reader, &mut stdout)?;
 }
@@ -49,30 +53,39 @@ SquashFS format itself. Support for more compressors will be coming soon:
 Squinter is designed to be a thin accessor for SquashFS content and seeks to minimize any extra
 processing, read-ahead, or other pro-active optimization of what the user may want to do next. The
 only non-passthrough functionality is a cache of previously decompressed metadata. As a result,
-squinter should perform very well on the basis of overhead, but perhaps less well for defined
-tasks like full filesystem extraction.
+squinter should perform well on the basis of overhead, but perhaps less well for defined
+tasks like full filesystem extraction. While the code has been written not to be wasteful, little
+attention has been paid to maximizing performance.
 
 Limited performance benches currently consist of surfing the directory tree of a reference SquashFS
-image. In these benches, squinter performs more than 10x faster than squashfs-ng. This
-performance difference is too great to be a credible indicator for general usage performance, but
-at least squinter doesn't appear to be a lagard.
+image. When purely reading dir entries, squinter comes in more than 10x faster that squashfs_ng.
+However, when file contents are also read, squinter is about 3x slower than quashfs_ng. Experiments
+with turning on the 'zlib-ng' feature in flate2 yielded up to 40% data read-speed improvements, but
+I feel like if I wanted to link a C library then I would just use squashfs_ng in the first place, so
+the feature remains disabled for now.
 
 For the below results, the reference SquashFS image was extracted from
 openwrt-23.05.5-layerscape-armv8_64b-fsl_ls1012a-rdb-squashfs-firmware.bin
 and then recompressed from xz to gzip with squashfs-tools. 'cargo bench' was run on an AMD 5700U
 @ 1400MHz w/ Samsung 980 PRO NVMe
 
-Time to open SquashFS image and read dir entries from root directory:
+Time to open zlib SquashFS image and read dir entries from root directory:
 | Library     | Time     |
 |-------------|----------|
 | squinter    | 46us     |
-| squashfs-ng | 59us     |
+| squashfs-ng | 60us     |
 
-Time to open SquashFS image and recursively read dir entries from all directories:
+Time to open zlib SquashFS image and recursively read dir entries from all directories:
 | Library     | Time     |
 |-------------|----------|
-| squinter    | 777us    |
+| squinter    | 808us    |
 | squashfs-ng | 11ms     |
+
+Time to open zlib SquashFS image and recursively read file contents from all files:
+| Library     | Time     |
+|-------------|----------|
+| squinter    | 215ms    |
+| squashfs-ng | 77ms     |
 
 ## Credits
 Squinter was written by Kyle Howell, and is entirely based on the on-disk specification documented
