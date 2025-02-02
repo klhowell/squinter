@@ -14,6 +14,13 @@ readme = "../README.md"
 name = "squashfs_read"
 harness = false
 
+[features]
+default = ["gzip", "xz"]
+gzip = ["flate2"]
+xz = ["lzma-rs"]
+flate2 = ["dep:flate2"]
+lzma-rs = ["dep:lzma-rs"]
+
 [dev-dependencies]
 squashfs-ng = "0.1.2"
 anyhow = "1.0.75"
@@ -23,5 +30,6 @@ test-assets-ureq = "0.5.0"
 [dependencies]
 bitflags = "1.3"
 byteorder = "1"
-flate2 = "1.0"
+flate2 = { version = "1.0", optional = true }
+lzma-rs = { version = "0.3", optional = true }
 num_enum = "0.5"

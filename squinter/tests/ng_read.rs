@@ -19,19 +19,33 @@ const TEST_SQUASH_NAME: &str = "test.squashfs";
 const TEST_SQUASH_OFFSET: u64 = 0x2000000;
 const TEST_SQUASH_LEN: Option<u64> = None;
 
-const COMPRESSION_METHODS: [&str;1] = ["gzip"];
+const COMPRESSION_METHODS: [&str;2] = ["gzip", "xz"];
 
 const TEST_ARCHIVE: &str = "../test_data/test.gzip.squashfs";
 
+
 /// Check that the file_names read from the root directory are the same
+#[cfg(feature = "flate2")]
 #[test]
-fn test_root() -> anyhow::Result<()> {
+fn test_root_gzip() -> anyhow::Result<()> {
+    test_root("gzip")
+}
+
+/// Check that the file_names read from the root directory are the same
+#[cfg(feature = "lzma-rs")]
+#[test]
+fn test_root_xz() -> anyhow::Result<()> {
+    test_root("xz")
+}
+
+fn test_root(c: &str) -> anyhow::Result<()> {
     prepare_test_files()?;
 
-    let archive = read::Archive::open(TEST_ARCHIVE)?;
+    let archive_path = format!("../test_data/test.{c}.squashfs");
+    let archive = read::Archive::open(&archive_path)?;
     let archive_rootdir = archive.get_exists("/")?.into_owned_dir()?;
 
-    let mut sqfs = squashfs::SquashFS::open(TEST_ARCHIVE)?;
+    let mut sqfs = squashfs::SquashFS::open(&archive_path)?;
     let sqfs_rootdir = sqfs.read_dir("/")?;
 
     let z = iter::zip(archive_rootdir, sqfs_rootdir);
@@ -44,15 +58,28 @@ fn test_root() -> anyhow::Result<()> {
     Ok(())
 }
 
-/// Check that the file_names read from the entire directory tree are the same
+/// Check that the file_names, attributes, and content read from the entire directory tree are the same
+#[cfg(feature = "flate2")]
 #[test]
-fn test_tree() -> anyhow::Result<()> {
+fn test_tree_gzip() -> anyhow::Result<()> {
+    test_tree("gzip")
+}
+
+/// Check that the file_names, attributes, and content read from the entire directory tree are the same
+#[cfg(feature = "lzma-rs")]
+#[test]
+fn test_tree_xz() -> anyhow::Result<()> {
+    test_tree("xz")
+}
+
+fn test_tree(c: &str) -> anyhow::Result<()> {
     prepare_test_files()?;
 
-    let archive = read::Archive::open(TEST_ARCHIVE)?;
+    let archive_path = format!("../test_data/test.{c}.squashfs");
+    let archive = read::Archive::open(&archive_path)?;
     let archive_rootnode = archive.get_exists("/")?;
 
-    let mut sqfs = squashfs::SquashFS::open(TEST_ARCHIVE)?;
+    let mut sqfs = squashfs::SquashFS::open(&archive_path)?;
     let sqfs_rootnode = sqfs.root_inode()?;
 
     let total = compare_and_descend(&mut sqfs, &sqfs_rootnode, &archive, archive_rootnode)?;

@@ -1,14 +1,19 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::io::{self, Take};
+use std::io::{self, Cursor, Take};
 use std::io::{Read, Seek, SeekFrom, BufReader};
 use std::ffi::CString;
 use std::mem;
 
 
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt};
-use flate2::read::ZlibDecoder;
 use num_enum::{IntoPrimitive, TryFromPrimitive};
+
+#[cfg(feature = "flate2")]
+use flate2::read::ZlibDecoder;
+
+#[cfg(feature = "lzma-rs")]
+use lzma_rs::xz_decompress;
 
 use super::superblock::{Compressor, Superblock};
 
@@ -44,6 +49,7 @@ pub(crate) fn read_metadata_block<R>(r: &mut R, c: &Compressor, buf: &mut [u8]) 
     }
 
     match c {
+        #[cfg(feature = "flate2")]
         Compressor::Gzip => {
             let mut dec = ZlibDecoder::new(r.take(size.into()));
             let mut total = 0;
@@ -56,6 +62,14 @@ pub(crate) fn read_metadata_block<R>(r: &mut R, c: &Compressor, buf: &mut [u8]) 
             }
             Ok((size as usize +2,total))
         },
+        #[cfg(feature = "lzma-rs")]
+        Compressor::Xz => {
+            let mut buf_reader = BufReader::new(r.take(size.into()));
+            let mut buf_writer = Cursor::new(buf);
+            xz_decompress(&mut buf_reader, &mut buf_writer)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            Ok((size as usize +2, buf_writer.position() as usize))
+        }
         _ => Err(io::Error::from(io::ErrorKind::Unsupported))
     }
 }
@@ -166,6 +180,7 @@ enum InnerReader<R> {
     None,
     Base(R),
     Uncompressed(BufReader<Take<R>>),
+    #[cfg(feature = "flate2")]
     Gzip(ZlibDecoder<Take<R>>),
 }
 
@@ -180,6 +195,7 @@ impl<R: Read> Read for InnerReader<R> {
         match self {
             InnerReader::Base(r) => r.read(buf),
             InnerReader::Uncompressed(r) => r.read(buf),
+            #[cfg(feature="flate2")]
             InnerReader::Gzip(r) => r.read(buf),
             _ => panic!("InnerReader::read: no inner value"),
         }
@@ -203,6 +219,7 @@ impl<R: Read + Seek> MetadataReader<R> {
         match self.inner {
             InnerReader::Base(r) => r,
             InnerReader::Uncompressed(r) => r.into_inner().into_inner(),
+            #[cfg(feature="flate2")]
             InnerReader::Gzip(r) => r.into_inner().into_inner(),
             InnerReader::None => panic!("into_inner: no inner value"),
         }
@@ -213,6 +230,7 @@ impl<R: Read + Seek> MetadataReader<R> {
         inner = match inner {
             InnerReader::Base(r) => InnerReader::Base(r),
             InnerReader::Uncompressed(r) => InnerReader::Base(r.into_inner().into_inner()),
+            #[cfg(feature="flate2")]
             InnerReader::Gzip(r) => InnerReader::Base(r.into_inner().into_inner()),
             InnerReader::None => panic!("into_inner: no inner value"),
         };
@@ -227,6 +245,7 @@ impl<R: Read + Seek> MetadataReader<R> {
                 InnerReader::Uncompressed(BufReader::new(r.take(size.into())))
             } else {
                 match self.comp {
+                    #[cfg(feature="flate2")]
                     Compressor::Gzip => InnerReader::Gzip(ZlibDecoder::new(r.take(size.into()))),
                     _ => { return Err(io::Error::from(io::ErrorKind::Unsupported)) },
                 }
@@ -260,6 +279,7 @@ impl<R: Read + Seek> Seek for MetadataReader<R> {
         self.inner = match inner {
             InnerReader::Base(r) => InnerReader::Base(r),
             InnerReader::Uncompressed(r) => InnerReader::Base(r.into_inner().into_inner()),
+            #[cfg(feature="flate2")]
             InnerReader::Gzip(r) => InnerReader::Base(r.into_inner().into_inner()),
             InnerReader::None => panic!("into_inner: no inner value"),
         };
