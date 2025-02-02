@@ -1,5 +1,5 @@
-// See https://dr-emann.github.io/squashfs/squashfs.html
-// for details on the SquashFS binary format
+//! See https://dr-emann.github.io/squashfs/squashfs.html
+//! for details on the SquashFS binary format
 
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
@@ -11,16 +11,18 @@ use super::metadata::{self, CachingMetadataReader};
 use super::readermux::{ReaderMux, ReaderClient};
 use super::superblock::Superblock;
 
+/// The top-level interface to a SquashFS filesystem. This struct can be used to look up Inodes,
+/// list directory contents, and open file data readers.
 #[derive(Debug)]
 pub struct SquashFS<R> {
     reader_mux: Box<ReaderMux<R>>,
     md_reader: CachingMetadataReader<ReaderClient<R>>,
     sb: Superblock,
-    pub id_table: metadata::IdLookupTable,
+    pub(crate) id_table: metadata::IdLookupTable,
 }
 
 impl SquashFS<File> {
-    /// Open a filepath as a SquashFS
+    /// Open the contents of a filepath as a SquashFS
     pub fn open<P>(path: P) -> io::Result<Self>
     where P: AsRef<Path>
     {
@@ -41,8 +43,7 @@ impl<R: Read + Seek> SquashFS<R> {
     }
 
     /// Retrieve an iterator that walks the dirents within a directory specified by the given
-    /// path.
-    /// path must refer to an existing directory or this function returns an error.
+    /// path. path must refer to an existing directory or this function returns an error.
     pub fn read_dir<P>(&mut self, path: P) -> io::Result<ReadDir<std::vec::IntoIter<metadata::DirTable>>>
     where P: AsRef<Path>
     {
@@ -53,9 +54,9 @@ impl<R: Read + Seek> SquashFS<R> {
 
     /// Retrieve an iterator that walks the dirents within a directory specified by the given
     /// DirEntry.
-    pub fn read_dir_entry(&mut self, dir_entry: &DirEntry) -> io::Result<ReadDir<std::vec::IntoIter<metadata::DirTable>>>
+    pub fn read_dir_dirent(&mut self, dir_entry: &DirEntry) -> io::Result<ReadDir<std::vec::IntoIter<metadata::DirTable>>>
     {
-        let inode = self.inode_from_entry(dir_entry.inode_ref)?;
+        let inode = self.inode_from_entryref(dir_entry.inode_ref)?;
         let dir_tables = metadata::DirTable::read_for_inode(&mut self.md_reader, &self.sb, &inode)?;
         Ok(ReadDir::new(dir_tables.into_iter()))
     }
@@ -68,7 +69,7 @@ impl<R: Read + Seek> SquashFS<R> {
         Ok(ReadDir::new(dir_tables.into_iter()))
     }
 
-    /// Create an IO reader for the contents of the files specified by the given path
+    /// Create an IO reader for the contents of the file specified by the given path
     pub fn open_file<P>(&mut self, path: P) -> io::Result<FileDataReader<ReaderClient<R>>>
     where P: AsRef<Path>
     {
@@ -77,22 +78,31 @@ impl<R: Read + Seek> SquashFS<R> {
         Ok(FileDataReader::from_inode(reader, &mut self.md_reader, &self.sb, &inode)?.unwrap())
     }
 
-    /// Create an IO reader for the contents of the files specified by the given Inode
+    /// Create an IO reader for the contents of the file specified by the given DirEntry
+    pub fn open_file_dirent<P>(&mut self, dir_entry: &DirEntry) -> io::Result<FileDataReader<ReaderClient<R>>>
+    {
+        let inode = self.inode_from_entryref(dir_entry.inode_ref)?;
+        let reader = self.reader_mux.client();
+        Ok(FileDataReader::from_inode(reader, &mut self.md_reader, &self.sb, &inode)?.unwrap())
+    }
+
+    /// Create an IO reader for the contents of the file specified by the given Inode
     pub fn open_file_inode(&mut self, inode: &metadata::Inode) -> io::Result<FileDataReader<ReaderClient<R>>> {
         let reader = self.reader_mux.client();
         Ok(FileDataReader::from_inode(reader, &mut self.md_reader, &self.sb, inode)?.unwrap())
     }
 
-    /// Retrieve the root Inode of the SquashFS
+    /// Retrieve the root Inode of the SquashFS. This corresponds to the '/' directory
     pub fn root_inode(&mut self) -> io::Result<metadata::Inode> {
         metadata::Inode::read_at_ref(&mut self.md_reader, &self.sb, self.sb.root_inode)
     }
 
     /// Retrieve the Inode specified by SquashFS metadata Entry Reference
-    pub fn inode_from_entry(&mut self, inode_ref: metadata::EntryReference) -> io::Result<metadata::Inode> {
+    pub fn inode_from_entryref(&mut self, inode_ref: metadata::EntryReference) -> io::Result<metadata::Inode> {
         metadata::Inode::read_at_ref(&mut self.md_reader, &self.sb, inode_ref)
     }
 
+    /// Retreive the Inode specified by the given path
     pub fn inode_from_path<P>(&mut self, path: P) -> io::Result<metadata::Inode>
     where P: AsRef<Path>
     {
@@ -102,7 +112,7 @@ impl<R: Read + Seek> SquashFS<R> {
                 Component::RootDir => self.root_inode()?,
                 Component::Normal(n) => {
                     self.read_dir_inode(&inode)?.find(|e| n == e.file_name().as_str())
-                        .map(|e| self.inode_from_entry(e.inode_ref()).ok())
+                        .map(|e| self.inode_from_entryref(e.inode_ref()).ok())
                         .flatten()
                         .ok_or(io::Error::from(io::ErrorKind::NotFound))?
                 },
@@ -113,8 +123,8 @@ impl<R: Read + Seek> SquashFS<R> {
     }
 }
 
-// A DirEntry, like in std::fs, represents a named inode-reference within a directory. For example, a filename
-// together with a reference to the file's inode.
+/// A DirEntry, like in std::fs, represents a named inode-reference within a directory. For example, a filename
+/// together with a reference to the file's inode.
 pub struct DirEntry {
     inner: metadata::DirEntry,
     inode_ref: metadata::EntryReference,
@@ -122,7 +132,7 @@ pub struct DirEntry {
 }
 
 impl DirEntry {
-    pub fn new(dt_start: u64, dt_inode_num: u32, inner: metadata::DirEntry) -> Self {
+    fn new(dt_start: u64, dt_inode_num: u32, inner: metadata::DirEntry) -> Self {
         let inode_ref = metadata::EntryReference::new(dt_start, inner.offset);
         let inode_num = dt_inode_num.wrapping_add_signed(inner.inode_offset as i32);
         Self { inner, inode_ref, inode_num }
@@ -136,12 +146,14 @@ impl DirEntry {
         self.inode_ref
     }
 
-    pub fn inode_num(&self) -> u32 {
+    #[allow(dead_code)]
+    fn inode_num(&self) -> u32 {
         self.inode_num
     }
 }
 
-// An iterator over the individual DirEntries in a list of DirEntry runs. The SquashFS filesystem
+/// An iterator over the individual DirEntries in a directory
+// This iterator combines DirEntries from a list of DirEntry runs. The SquashFS filesystem
 // potentially splits the DirEntries for a directory table across multiple runs, so this object must
 // combine walking of both runs and entries into the next() Iterator function.
 pub struct ReadDir<TI> {

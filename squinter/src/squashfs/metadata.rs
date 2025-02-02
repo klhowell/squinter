@@ -22,10 +22,10 @@ macro_rules! div_ceil {
 // SquashFS Metadata block size is fixed by the specification
 const METADATA_BLOCK_SIZE: u16 = 8192;
 
-// Read and decompress a single metadata block from the provided Reader into the provided buffer.
-// Metadata blocks are always 8KB. If a smaller buffer is provided then only part of the block is
-// read and the ending Reader position is undefined.
-pub fn read_metadata_block<R>(r: &mut R, c: &Compressor, buf: &mut [u8]) -> io::Result<(usize, usize)>
+/// Read and decompress a single metadata block from the provided Reader into the provided buffer.
+/// Metadata blocks are always 8KB. If a smaller buffer is provided then only part of the block is
+/// read and the ending Reader position is undefined.
+pub(crate) fn read_metadata_block<R>(r: &mut R, c: &Compressor, buf: &mut [u8]) -> io::Result<(usize, usize)>
     where R: Read
 {
     let header: u16 = r.read_u16::<LittleEndian>()?;
@@ -79,7 +79,7 @@ pub fn read_metadata_block<R>(r: &mut R, c: &Compressor, buf: &mut [u8]) -> io::
 // short read up until the end of the current block, and the user must call read a second time to
 // retrieve the next block's data.
 #[derive(Debug)]
-pub struct CachingMetadataReader<R> {
+pub(crate) struct CachingMetadataReader<R> {
     inner: R,                                       // Backing reader on the compressed stream
     cur_pos: u64,                                   // Virtual seek offset within the *compressed* stream
     stream_pos: u64,                                // Actual seek position of backing reader
@@ -187,16 +187,18 @@ impl<R: Read> Read for InnerReader<R> {
 
 }
 
-pub struct MetadataReader<R> {
+pub(crate) struct MetadataReader<R> {
     inner: InnerReader<R>,
     comp: Compressor,
 }
 
 impl<R: Read + Seek> MetadataReader<R> {
+    #[allow(dead_code)]
     pub fn new(inner: R, comp: Compressor) -> MetadataReader<R> {
         MetadataReader { inner: InnerReader::Base(inner), comp }
     }
 
+    #[allow(dead_code)]
     pub fn into_inner(self) -> R {
         match self.inner {
             InnerReader::Base(r) => r,
@@ -269,33 +271,38 @@ impl<R: Read + Seek> Seek for MetadataReader<R> {
     }
 }
 
+/// An opaque reference value that can be used to retrieve a specific [`Inode`] using [`inode_from_entryref`].
+/// 
+/// [`Inode`]: struct.Inode.html
+/// [`inode_from_entryref`]: ../squashfs/struct.SquashFS.html#method.inode_from_entryref
 #[derive(Clone, Copy)]
 pub struct EntryReference {
     val: u64
 }
 
+#[allow(dead_code)]
 impl EntryReference {
-    pub fn new(location: u64, offset: u16) -> Self {
+    pub(crate) fn new(location: u64, offset: u16) -> Self {
         Self {
             val: (location << 16) | u64::from(offset),
         }
     }
 
-    pub fn location(&self) -> u64 {
+    pub(crate) fn location(&self) -> u64 {
         self.val >> 16
     }
 
-    pub fn offset(&self) -> u16 {
+    pub(crate) fn offset(&self) -> u16 {
         (self.val & 0xFFFF) as u16
     }
 
-    pub fn from_bytes(buf: &[u8]) -> Self {
+    pub(crate) fn from_bytes(buf: &[u8]) -> Self {
         Self {
             val: LittleEndian::read_u64(buf)
         }
     }
 
-    pub fn read<R>(r: &mut R) -> io::Result<Self>
+    pub(crate) fn read<R>(r: &mut R) -> io::Result<Self>
     where R: Read
     {
         Ok(Self {
@@ -310,27 +317,30 @@ impl std::fmt::Debug for EntryReference {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
-pub struct ExtendedAttribute {
+struct ExtendedAttribute {
     pub prefix: u16,
     pub name: String,
     pub value: AttributeValue,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
-pub struct ExtendedAttributeLookupEntry {
+struct ExtendedAttributeLookupEntry {
     pub xattr_ref: u64,
     pub count: u32,
     pub size: u32,
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
-pub enum AttributeValue {
+enum AttributeValue {
     Value(Vec<u8>),
     Ref(EntryReference),
 }
 
-pub trait FromBytes {
+pub(crate) trait FromBytes {
     const BYTE_SIZE: u16;
     fn from_bytes(buf: &[u8]) -> Self;
 }
@@ -363,7 +373,7 @@ impl FromBytes for ExtendedAttributeLookupEntry {
 }
 
 #[derive(Debug)]
-pub struct LookupTable<I: FromBytes> {
+pub(crate) struct LookupTable<I: FromBytes> {
     pub block_offsets: Vec<u64>,
     pub entries: Vec<I>,
 }
@@ -406,7 +416,7 @@ impl<I: FromBytes> LookupTable<I> {
 }
 
 #[derive(Debug)]
-pub struct FragmentEntry {
+pub(crate) struct FragmentEntry {
     pub start: u64,
     pub size: u32,
 }
@@ -422,7 +432,7 @@ impl FromBytes for FragmentEntry {
 }
 
 #[derive(Debug)]
-pub struct FragmentLookupTable {
+pub(crate) struct FragmentLookupTable {
     pub lu_table: LookupTable<FragmentEntry>,
 }
 
@@ -437,7 +447,7 @@ impl FragmentLookupTable {
 }
 
 #[derive(Debug)]
-pub struct IdLookupTable {
+pub(crate) struct IdLookupTable {
     pub lu_table: LookupTable<u32>,
 }
 
@@ -451,13 +461,15 @@ impl IdLookupTable {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
-pub struct ExportLookupTable {
+struct ExportLookupTable {
     pub lu_table: LookupTable<EntryReference>,
 }
 
 impl ExportLookupTable {
-    pub fn read<R>(r: &mut R, sb: &Superblock) -> io::Result<Option<Self>> 
+    #[allow(dead_code)]
+    fn read<R>(r: &mut R, sb: &Superblock) -> io::Result<Option<Self>> 
     where R: Read + Seek
     {
         if sb.export_table == u64::MAX {
@@ -469,15 +481,17 @@ impl ExportLookupTable {
     }
 }
 
+#[allow(dead_code)]
 #[derive(Debug)]
-pub struct ExtendedAttributeLookupTable {
-    pub kv_start: u64,
-    pub count: u32,
-    pub lu_table: LookupTable<ExtendedAttributeLookupEntry>,
+struct ExtendedAttributeLookupTable {
+    kv_start: u64,
+    count: u32,
+    lu_table: LookupTable<ExtendedAttributeLookupEntry>,
 }
 
 impl ExtendedAttributeLookupTable {
-    pub fn read<R>(r: &mut R, sb: &Superblock) -> io::Result<Option<Self>> 
+    #[allow(dead_code)]
+    fn read<R>(r: &mut R, sb: &Superblock) -> io::Result<Option<Self>> 
     where R: Read + Seek
     {
         if sb.xattr_table == u64::MAX {
@@ -494,9 +508,10 @@ impl ExtendedAttributeLookupTable {
     }
 }
 
+/// Information about an object in the filesystem (ex. file, directory, device node)
 #[derive(Debug)]
 pub struct Inode {
-    pub inode_type: InodeType,
+    inode_type: InodeType,
     permissions: u16,
     uid_index: u16,
     gid_index: u16,
@@ -507,7 +522,7 @@ pub struct Inode {
 
 #[derive(Debug, IntoPrimitive, TryFromPrimitive)]
 #[repr(u16)]
-pub enum InodeType {
+enum InodeType {
     BasicDir = 1,
     BasicFile = 2,
     BasicSymlink = 3,
@@ -526,6 +541,7 @@ pub enum InodeType {
     Unknown = 0xFFFF,
 }
 
+/// Type-specific information about a filesystem object
 #[derive(Debug)]
 pub enum InodeExtendedInfo {
     None,
@@ -537,55 +553,68 @@ pub enum InodeExtendedInfo {
     BasicIpc(BasicIpcInfo),
 }
 
+/// Information about a directory object in the filesystem
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct BasicDirInfo {
-    pub block_index: u32,
-    pub link_count: u32,
-    pub file_size: u16,
-    pub block_offset: u16,
+    block_index: u32,
+    link_count: u32,
+    file_size: u16,
+    block_offset: u16,
     pub parent_inode: u32,
 }
 
+/// Information about a directory object with extended attributes in the filesystem
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct ExtDirInfo {
-    pub link_count: u32,
+    link_count: u32,
     pub file_size: u32,
-    pub block_index: u32,
+    block_index: u32,
     pub parent_inode: u32,
-    pub index_count: u16,
-    pub block_offset: u16,
-    pub xattr_index: u32,
+    index_count: u16,
+    block_offset: u16,
+    xattr_index: u32,
 }
 
+/// Information about a file object in the filesystem
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct BasicFileInfo {
-    pub blocks_start: u32,
-    pub frag_index: u32,
-    pub block_offset: u32,
+    pub(crate) blocks_start: u32,
+    pub(crate) frag_index: u32,
+    pub(crate) block_offset: u32,
     pub file_size: u32,
-    pub block_sizes: Vec<u32>,
+    pub(crate) block_sizes: Vec<u32>,
 }
 
 
+/// Information about a symbolic link object in the filesystem
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct BasicSymlinkInfo {
-    pub link_count: u32,
+    link_count: u32,
     pub target_path: CString,
 }
 
+/// Information about a device object in the filesystem
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct BasicDevInfo {
-    pub link_count: u32,
+    link_count: u32,
     pub dev_number: u32,
 }
 
+/// Information about an IPC object in the filesystem
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct BasicIpcInfo {
-    pub link_count: u32,
+    link_count: u32,
 }
 
 impl Inode {
-    pub fn read<R>(r: &mut R, block_size: u32) -> io::Result<Self>
+    #[allow(dead_code)]
+    pub(crate) fn read<R>(r: &mut R, block_size: u32) -> io::Result<Self>
     where R: Read
     {
         let inode_type = InodeType::try_from(r.read_u16::<LittleEndian>()?).unwrap();
@@ -666,7 +695,8 @@ impl Inode {
         })
     }
 
-    pub fn read_at_ref<R>(r: &mut R, sb: &Superblock, inode_ref: EntryReference) -> io::Result<Self>
+    #[allow(dead_code)]
+    pub(crate) fn read_at_ref<R>(r: &mut R, sb: &Superblock, inode_ref: EntryReference) -> io::Result<Self>
     where R: Read + Seek
     {
         r.seek(SeekFrom::Start(sb.inode_table + inode_ref.location()))?;
@@ -676,7 +706,8 @@ impl Inode {
         Self::read(r, sb.block_size)
     }
 
-    pub fn from_bytes(buf: &mut [u8], block_size: u32) -> Self {
+    #[allow(dead_code)]
+    pub(crate) fn from_bytes(buf: &mut [u8], block_size: u32) -> Self {
         Self::read(&mut &buf[..], block_size).unwrap()
     }
 
@@ -720,12 +751,14 @@ impl Inode {
         mode
     }
 
-    pub fn uid(&self, id_table: &IdLookupTable) -> io::Result<u32> {
+    pub fn uid<A>(&self, sqfs: &super::SquashFS<A>) -> io::Result<u32> {
+        let id_table = &sqfs.id_table;
         id_table.lu_table.entries.get(self.uid_index as usize).cloned()
         .ok_or(io::Error::from(io::ErrorKind::NotFound))
     }
 
-    pub fn gid(&self, id_table: &IdLookupTable) -> io::Result<u32> {
+    pub fn gid<A>(&self, sqfs: &super::SquashFS<A>) -> io::Result<u32> {
+        let id_table = &sqfs.id_table;
         id_table.lu_table.entries.get(self.gid_index as usize).cloned()
         .ok_or(io::Error::from(io::ErrorKind::NotFound))
     }
@@ -735,6 +768,7 @@ impl Inode {
     }
 }
 
+#[doc(hidden)]
 #[derive(Debug)]
 pub struct DirTable {
     pub count: u32,
@@ -743,16 +777,18 @@ pub struct DirTable {
     pub entries: Vec<DirEntry>,
 }
 
+#[doc(hidden)]
+#[allow(dead_code)]
 #[derive(Debug)]
 pub struct DirEntry {
-    pub offset: u16,
-    pub inode_offset: i16,
-    pub inode_type: InodeType,
-    pub name: CString,
+    pub(crate) offset: u16,
+    pub(crate) inode_offset: i16,
+    inode_type: InodeType,
+    pub(crate) name: CString,
 }
 
 impl DirTable {
-    pub fn load<R>(r: &mut R) -> io::Result<Self>
+    pub(crate) fn load<R>(r: &mut R) -> io::Result<Self>
     where R: Read
     {
         let count = r.read_u32::<LittleEndian>()? + 1;
@@ -779,7 +815,7 @@ impl DirTable {
         })
     }
 
-    pub fn read_for_inode<R>(r: &mut R, sb: &Superblock, inode: &Inode) -> io::Result<Vec<Self>>
+    pub(crate) fn read_for_inode<R>(r: &mut R, sb: &Superblock, inode: &Inode) -> io::Result<Vec<Self>>
     where R: Read + Seek
     {
         let (block_index, block_offset, file_size) = match &inode.extended_info {

@@ -58,7 +58,7 @@ fn read_and_descend_sqfs(sqfs: &mut squashfs::SquashFS<std::fs::File>, sq_inode:
 
     let mut total = 0;
     for de in sqfs_dir {
-        let sq_inode = sqfs.inode_from_entry(de.inode_ref())?;
+        let sq_inode = sqfs.inode_from_entryref(de.inode_ref())?;
         if content && sq_inode.is_file() {
             let mut sq_reader = BufReader::new(sqfs.open_file_inode(&sq_inode)?);
             std::io::copy(&mut sq_reader, &mut std::io::sink())?;

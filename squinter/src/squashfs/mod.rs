@@ -1,7 +1,8 @@
 mod squashfs;
-pub mod superblock;
-pub mod metadata;
-pub mod filedata;
-pub mod readermux;
+mod filedata;
+mod readermux;
+mod superblock;
 
+pub mod metadata;
 pub use squashfs::*;
+pub use metadata::Inode;

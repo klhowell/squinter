@@ -64,7 +64,7 @@ fn print_and_descend_dir(sqfs: &mut SquashFS<File>, files: &Vec<PathBuf>, parent
 
     println!("{}", path.to_str().unwrap());
 
-    let inode = sqfs.inode_from_entry(d.inode_ref())?;
+    let inode = sqfs.inode_from_entryref(d.inode_ref())?;
     if inode.is_dir() {
         for d in sqfs.read_dir_inode(&inode)? {
             print_and_descend_dir(sqfs, files, &path, &d)?;
@@ -98,7 +98,7 @@ fn cat_and_descend_dir(sqfs: &mut SquashFS<File>, files: &Vec<PathBuf>, parent: 
         return Ok(());
     }
 
-    let inode = sqfs.inode_from_entry(d.inode_ref())?;
+    let inode = sqfs.inode_from_entryref(d.inode_ref())?;
     if inode.is_file() {
         //eprintln!("File -> {}", path.to_str().unwrap());
         let mut r = sqfs.open_file_inode(&inode)?;

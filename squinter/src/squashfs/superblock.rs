@@ -7,6 +7,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 use super::metadata::EntryReference;
 
+#[allow(dead_code)]
 pub const MAGIC: u32 = 0x73717368;
 
 #[derive(Debug)]
@@ -61,6 +62,7 @@ pub enum Compressor {
     Unknown = 0xFFFF,
 }
 
+#[allow(dead_code)]
 pub struct GzipOptions {
     pub compression_level: u32,
     pub window_size: u16,

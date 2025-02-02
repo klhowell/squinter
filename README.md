@@ -11,7 +11,9 @@ squashfs-ng for the few sources that have been tested. It can be used to find fi
 read their properties and contents. Other than several compression algorithms, the only part of the
 SquashFS specification that is known to not be supported is extended attributes.
 
-Squinter is still experimental and should not be considered ready for production use.
+Squinter is still experimental and should not be considered ready for production use. Consumers
+should expect APIs to change frequently. Only happy paths have been tested, and broken or
+maliciously constructed SquashFS filesystems *will* result in bad data and/or crashes.
 
 ## Usage
 Add the following to your `Cargo.toml`:
@@ -20,17 +22,24 @@ squinter = "0.1.0"
 ```
 
 ```rust
+use std::io;
 use squinter::squashfs::SquashFS;
-fn print_file_from_squashfs() {
+fn print_file_from_squashfs() -> io::Result<()>{
     // Open the SquashFS
-    let sqfs = SquashFS::open("rootfs.squashfs")?;
+    let mut sqfs = SquashFS::open("rootfs.squashfs")?;
+
+    // List the contents of a directory
+    for d in sqfs.read_dir("/etc")? {
+        println!("{}", d.file_name())
+    }
 
     // Open a file to read its contents
-    let file_reader = sqfs.open_file("/etc/group")?;
+    let mut file_reader = sqfs.open_file("/etc/group")?;
     
     // Copy the file contents to stdout
     let mut stdout = io::stdout().lock();
     io::copy(&mut file_reader, &mut stdout)?;
+    Ok(())
 }
 ```
 
@@ -59,7 +68,7 @@ attention has been paid to maximizing performance.
 
 Limited performance benches currently consist of surfing the directory tree of a reference SquashFS
 image. When purely reading dir entries, squinter comes in more than 10x faster that squashfs_ng.
-However, when file contents are also read, squinter is about 3x slower than quashfs_ng. Experiments
+However, when file contents are also read, squinter is about 3x slower than squashfs_ng. Experiments
 with turning on the 'zlib-ng' feature in flate2 yielded up to 40% data read-speed improvements, but
 I feel like if I wanted to link a C library then I would just use squashfs_ng in the first place, so
 the feature remains disabled for now.
