@@ -1,4 +1,9 @@
-# squinter
+# Squinter &emsp; [![Latest Version]][crates.io] [![Documentation]][docs.rs]
+
+[Latest Version]: https://img.shields.io/crates/v/squinter.svg
+[crates.io]: https://crates.io/crates/squinter
+[Documentation]: https://img.shields.io/badge/docs.rs-squinter-66c2a5
+[docs.rs]: https://docs.rs/squinter
 
 A **Squ**ashFS **inter**face library written in Rust. Squinter is designed to provide live, dynamic,
 read-only access to the contents of a SquashFS filesystem in the fashion that might be expected of
