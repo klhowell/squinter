@@ -6,7 +6,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 authors = ["Kyle Howell <kyle@howellweb.net>"]
 edition = "2021"
 repository = "https://github.com/klhowell/squinter"
