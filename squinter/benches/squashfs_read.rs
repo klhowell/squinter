@@ -16,7 +16,7 @@ const TEST_SQUASH_NAME: &str = "test.squashfs";
 const TEST_SQUASH_OFFSET: u64 = 0x2000000;
 const TEST_SQUASH_LEN: Option<u64> = None;
 
-const COMPRESSION_METHODS: [&str;2] = ["gzip", "xz"];
+const COMPRESSION_METHODS: [&str;3] = ["gzip", "xz", "zstd"];
 
 fn read_root_sqfs(test_file: &str) -> anyhow::Result<usize> {
 

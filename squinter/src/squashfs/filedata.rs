@@ -8,6 +8,9 @@ use flate2::read::ZlibDecoder;
 #[cfg(feature = "lzma-rs")]
 use lzma_rs::xz_decompress;
 
+#[cfg(feature = "ruzstd")]
+use ruzstd::decoding::{FrameDecoder, StreamingDecoder};
+
 use super::metadata::{self, FragmentEntry, Inode, InodeExtendedInfo};
 use super::superblock::{Superblock, Compressor};
 
@@ -37,7 +40,7 @@ struct TailEnd {
 /// 
 /// The stream position can be calculated from file position of the current block + the amount
 /// already read from that block.
-pub struct FileDataReader<R> {
+pub struct FileDataReader<R: Read> {
     inner: InnerReader<R>,
     pos: u64,
     comp: Compressor,
@@ -150,6 +153,13 @@ impl<R: Read + Seek> FileDataReader<R> {
                         let r = buf_reader.into_inner().into_inner();
                         InnerReader::Buffer((r, buf_writer))
                     },
+                    #[cfg(feature = "ruzstd")]
+                    Compressor::Zstd => {
+                        let dec = StreamingDecoder::new(r.take(block.disk_len.into()))
+                            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?
+                            .take((offset + data_remaining).into());
+                        InnerReader::Zstd(dec)
+                    },
                     _ => { return Err(io::Error::from(io::ErrorKind::Unsupported)) },
                 };
                 io::copy(&mut Read::take(&mut inner, offset.into()), &mut io::sink())?;
@@ -215,24 +225,31 @@ impl<R: Read + Seek> Seek for FileDataReader<R> {
     }
 }
 
-enum InnerReader<R> {
+enum InnerReader<R>
+where
+    R: Read,
+{
     None,
     Base(R),
     Uncompressed(Take<R>),
+    Buffer((R, Cursor<Vec<u8>>)),
     #[cfg(feature = "flate2")]
     Gzip(Take<ZlibDecoder<Take<R>>>),
-    Buffer((R, Cursor<Vec<u8>>)),
+    #[cfg(feature = "ruzstd")]
+    Zstd(Take<StreamingDecoder<Take<R>, FrameDecoder>>),
 }
 
 #[allow(dead_code)]
-impl<R> InnerReader<R> {
+impl<R: Read> InnerReader<R> {
     pub fn into_inner(self) -> R {
         match self {
             InnerReader::Base(r) => r,
             InnerReader::Uncompressed(r) => r.into_inner(),
+            InnerReader::Buffer(r) => r.0,
             #[cfg(feature="flate2")]
             InnerReader::Gzip(r) => r.into_inner().into_inner().into_inner(),
-            InnerReader::Buffer(r) => r.0,
+            #[cfg(feature="ruzstd")]
+            InnerReader::Zstd(r) => r.into_inner().into_inner().into_inner(),
             InnerReader::None => panic!("into_inner: no inner value"),
         }
     }
@@ -253,10 +270,13 @@ impl<R: Read> Read for InnerReader<R> {
         match self {
             InnerReader::Base(r) => r.read(buf),
             InnerReader::Uncompressed(r) => r.read(buf),
+            InnerReader::Buffer(r) => r.1.read(buf),
             #[cfg(feature="flate2")]
             InnerReader::Gzip(r) => r.read(buf),
-            InnerReader::Buffer(r) => r.1.read(buf),
+            #[cfg(feature="ruzstd")]
+            InnerReader::Zstd(r) => r.read(buf),
             _ => panic!("InnerReader::read: no inner value"),
         }
     }
+
 }

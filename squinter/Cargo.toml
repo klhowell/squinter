@@ -15,11 +15,13 @@ name = "squashfs_read"
 harness = false
 
 [features]
-default = ["gzip", "xz"]
+default = ["gzip", "xz", "zstd"]
 gzip = ["flate2"]
 xz = ["lzma-rs"]
+zstd = ["ruzstd"]
 flate2 = ["dep:flate2"]
 lzma-rs = ["dep:lzma-rs"]
+ruzstd = ["dep:ruzstd"]
 
 [dev-dependencies]
 squashfs-ng = "0.1.2"
@@ -33,3 +35,4 @@ byteorder = "1"
 flate2 = { version = "1.0", optional = true }
 lzma-rs = { version = "0.3", optional = true }
 num_enum = "0.5"
+ruzstd = { version = "0.8", optional = true }

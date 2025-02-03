@@ -19,10 +19,7 @@ const TEST_SQUASH_NAME: &str = "test.squashfs";
 const TEST_SQUASH_OFFSET: u64 = 0x2000000;
 const TEST_SQUASH_LEN: Option<u64> = None;
 
-const COMPRESSION_METHODS: [&str;2] = ["gzip", "xz"];
-
-const TEST_ARCHIVE: &str = "../test_data/test.gzip.squashfs";
-
+const COMPRESSION_METHODS: [&str;3] = ["gzip", "xz", "zstd"];
 
 /// Check that the file_names read from the root directory are the same
 #[cfg(feature = "flate2")]
@@ -36,6 +33,13 @@ fn test_root_gzip() -> anyhow::Result<()> {
 #[test]
 fn test_root_xz() -> anyhow::Result<()> {
     test_root("xz")
+}
+
+/// Check that the file_names read from the root directory are the same
+#[cfg(feature = "ruzstd")]
+#[test]
+fn test_root_zstd() -> anyhow::Result<()> {
+    test_root("zstd")
 }
 
 fn test_root(c: &str) -> anyhow::Result<()> {
@@ -70,6 +74,13 @@ fn test_tree_gzip() -> anyhow::Result<()> {
 #[test]
 fn test_tree_xz() -> anyhow::Result<()> {
     test_tree("xz")
+}
+
+/// Check that the file_names, attributes, and content read from the entire directory tree are the same
+#[cfg(feature = "ruzstd")]
+#[test]
+fn test_tree_zstd() -> anyhow::Result<()> {
+    test_tree("zstd")
 }
 
 fn test_tree(c: &str) -> anyhow::Result<()> {
