@@ -1,3 +1,4 @@
+mod compressed;
 mod squashfs;
 mod filedata;
 mod readermux;

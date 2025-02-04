@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::io::{self, Cursor, Take};
+use std::io::{self, Cursor};
 use std::io::{Read, Seek, SeekFrom, BufReader};
 use std::ffi::CString;
 use std::mem;
@@ -16,9 +16,10 @@ use flate2::read::ZlibDecoder;
 use lzma_rs::xz_decompress;
 
 #[cfg(feature = "ruzstd")]
-use ruzstd::decoding::{FrameDecoder, StreamingDecoder};
+use ruzstd::decoding::StreamingDecoder;
 
 use super::superblock::{Compressor, Superblock};
+use super::compressed::CompressedBlockReader;
 
 //let block_count = (item_count + (METADATA_BLOCK_SIZE / I::BYTE_SIZE) as u32 - 1) / (METADATA_BLOCK_SIZE / I::BYTE_SIZE) as u32;
 
@@ -193,99 +194,39 @@ impl<R: Read + Seek> Seek for CachingMetadataReader<R> {
     }
 }
 
-enum InnerReader<R>
-where
-    R: Read,
-{
-    None,
-    Base(R),
-    Uncompressed(BufReader<Take<R>>),
-    #[cfg(feature = "flate2")]
-    Gzip(ZlibDecoder<Take<R>>),
-    #[cfg(feature = "ruzstd")]
-    Zstd(StreamingDecoder<Take<R>, FrameDecoder>),
-}
-
-impl<R: Read> InnerReader<R> {
-    fn take(&mut self) -> InnerReader<R> {
-        mem::replace(self, InnerReader::None)
-    }
-}
-
-impl<R: Read> Read for InnerReader<R> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        match self {
-            InnerReader::Base(r) => r.read(buf),
-            InnerReader::Uncompressed(r) => r.read(buf),
-            #[cfg(feature="flate2")]
-            InnerReader::Gzip(r) => r.read(buf),
-            #[cfg(feature="ruzstd")]
-            InnerReader::Zstd(r) => r.read(buf),
-            _ => panic!("InnerReader::read: no inner value"),
-        }
-    }
-
-}
-
 pub(crate) struct MetadataReader<R>
 where
     R: Read,
 {
-    inner: InnerReader<R>,
+    inner: CompressedBlockReader<R>,
     comp: Compressor,
 }
 
 impl<R: Read + Seek> MetadataReader<R> {
     #[allow(dead_code)]
     pub fn new(inner: R, comp: Compressor) -> MetadataReader<R> {
-        MetadataReader { inner: InnerReader::Base(inner), comp }
+        MetadataReader { inner: CompressedBlockReader::Base(inner), comp }
     }
 
     #[allow(dead_code)]
     pub fn into_inner(self) -> R {
-        match self.inner {
-            InnerReader::Base(r) => r,
-            InnerReader::Uncompressed(r) => r.into_inner().into_inner(),
-            #[cfg(feature="flate2")]
-            InnerReader::Gzip(r) => r.into_inner().into_inner(),
-            #[cfg(feature="ruzstd")]
-            InnerReader::Zstd(r) => r.into_inner().into_inner(),
-            InnerReader::None => panic!("into_inner: no inner value"),
-        }
+        self.inner.into_inner()
     }
 
     fn start_block(&mut self) -> io::Result<()> {
-        let mut inner = InnerReader::take(&mut self.inner);
-        inner = match inner {
-            InnerReader::Base(r) => InnerReader::Base(r),
-            InnerReader::Uncompressed(r) => InnerReader::Base(r.into_inner().into_inner()),
-            #[cfg(feature="flate2")]
-            InnerReader::Gzip(r) => InnerReader::Base(r.into_inner().into_inner()),
-            #[cfg(feature="ruzstd")]
-            InnerReader::Zstd(r) => InnerReader::Base(r.into_inner().into_inner()),
-            InnerReader::None => panic!("into_inner: no inner value"),
-        };
+        let inner = CompressedBlockReader::take(&mut self.inner);
+        let inner = inner.into_base();
 
-        if let InnerReader::Base(mut r) = inner {
+        if let CompressedBlockReader::Base(mut r) = inner {
             let header: u16 = r.read_u16::<LittleEndian>()?;
             let size: u16 = header & 0x7FFF;
             let compressed: bool = header & 0x8000 == 0;
             //println!("MetadataReader: Starting block. Compressed = {}; Size = {}", compressed, size);
 
             self.inner = if !compressed {
-                InnerReader::Uncompressed(BufReader::new(r.take(size.into())))
+                CompressedBlockReader::Uncompressed(r.take(size.into()))
             } else {
-                match self.comp {
-                    #[cfg(feature="flate2")]
-                    Compressor::Gzip => InnerReader::Gzip(ZlibDecoder::new(r.take(size.into()))),
-                    #[cfg(feature="ruzstd")]
-                    Compressor::Zstd => {
-                        let dec = StreamingDecoder::new(r.take(size.into()))
-                            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-                        InnerReader::Zstd(dec)
-                    },
-                    _ => { return Err(io::Error::from(io::ErrorKind::Unsupported)) },
-                }
+                CompressedBlockReader::new(r, self.comp, size.into(), METADATA_BLOCK_SIZE.into())?
             };
             Ok(())
         } else {
@@ -296,7 +237,7 @@ impl<R: Read + Seek> MetadataReader<R> {
 
 impl<R: Read + Seek> Read for MetadataReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if let InnerReader::Base(_) = self.inner {
+        if let CompressedBlockReader::Base(_) = self.inner {
             self.start_block()?;
         }
 
@@ -312,17 +253,9 @@ impl<R: Read + Seek> Read for MetadataReader<R> {
 
 impl<R: Read + Seek> Seek for MetadataReader<R> {
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
-        let inner = InnerReader::take(&mut self.inner);
-        self.inner = match inner {
-            InnerReader::Base(r) => InnerReader::Base(r),
-            InnerReader::Uncompressed(r) => InnerReader::Base(r.into_inner().into_inner()),
-            #[cfg(feature="flate2")]
-            InnerReader::Gzip(r) => InnerReader::Base(r.into_inner().into_inner()),
-            #[cfg(feature="ruzstd")]
-            InnerReader::Zstd(r) => InnerReader::Base(r.into_inner().into_inner()),
-            InnerReader::None => panic!("into_inner: no inner value"),
-        };
-        if let InnerReader::Base(r) = &mut self.inner {
+        let inner = CompressedBlockReader::take(&mut self.inner);
+        self.inner = inner.into_base();
+        if let CompressedBlockReader::Base(r) = &mut self.inner {
             r.seek(pos)
         } else {
             panic!("seek: not Base reader");
