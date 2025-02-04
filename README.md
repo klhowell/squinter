@@ -23,7 +23,7 @@ maliciously constructed SquashFS filesystems *will* result in bad data and/or cr
 ## Usage
 Add the following to your `Cargo.toml`:
 ```toml
-squinter = "0.1.0"
+squinter = "0.2.0"
 ```
 
 ```rust
@@ -83,8 +83,8 @@ least by default) for the time being.
 
 For the below results, the reference SquashFS image was extracted from
 openwrt-23.05.5-layerscape-armv8_64b-fsl_ls1012a-rdb-squashfs-firmware.bin
-and then recompressed from xz to gzip with squashfs-tools. 'cargo bench' was run on an AMD 5700U
-@ 1400MHz w/ Samsung 980 PRO NVMe
+and then recompressed from xz to each of the tested compression algorithms with squashfs-tools-ng.
+'cargo bench' was run on an AMD 5700U @ 1400MHz w/ Samsung 980 PRO NVMe
 
 | Benchmark                                 | Squashfs-ng | Squinter | Difference |
 |-------------------------------------------|-------------|----------|------------|
