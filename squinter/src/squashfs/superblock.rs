@@ -84,7 +84,7 @@ impl Superblock {
     pub fn read<R>(r: &mut R) -> io::Result<Superblock>
     where R: Read
     {
-        Ok(Superblock {
+        let sb = Superblock {
             magic: r.read_u32::<LittleEndian>()?,
             inode_count: r.read_u32::<LittleEndian>()?,
             mod_time: r.read_u32::<LittleEndian>()?,
@@ -104,7 +104,11 @@ impl Superblock {
             dir_table: r.read_u64::<LittleEndian>()?,
             frag_table: r.read_u64::<LittleEndian>()?,
             export_table: r.read_u64::<LittleEndian>()?,
-        })
+        };
+        if sb.magic != MAGIC {
+            return Err(io::Error::new(io::ErrorKind::InvalidData, "Incorrect SquashFS magic"));
+        }
+        Ok(sb)
     }
 
     pub fn from_bytes(b: &[u8]) -> io::Result<Superblock>
