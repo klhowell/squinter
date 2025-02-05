@@ -1,22 +1,12 @@
+use std::cmp::min;
 use std::collections::HashMap;
 use std::fmt::Debug;
-use std::io::{self, Cursor};
-use std::io::{Read, Seek, SeekFrom, BufReader};
+use std::io::{self, Cursor, Read, Seek, SeekFrom};
 use std::ffi::CString;
 use std::mem;
 
-
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
-
-#[cfg(feature = "flate2")]
-use flate2::read::ZlibDecoder;
-
-#[cfg(feature = "lzma-rs")]
-use lzma_rs::xz_decompress;
-
-#[cfg(feature = "ruzstd")]
-use ruzstd::decoding::StreamingDecoder;
 
 use super::superblock::{Compressor, Superblock};
 use super::compressed::CompressedBlockReader;
@@ -52,44 +42,14 @@ pub(crate) fn read_metadata_block<R>(r: &mut R, c: &Compressor, buf: &mut [u8]) 
         return r.read_exact(&mut buf[..size.into()]).map(|_| size.into()).map(|x| (size as usize +2, x));
     }
 
-    match c {
-        #[cfg(feature = "flate2")]
-        Compressor::Gzip => {
-            let mut dec = ZlibDecoder::new(r.take(size.into()));
-            let mut total = 0;
-            while total < buf.len() {
-                let read_size = dec.read(&mut buf[total..])?;
-                total += read_size;
-                if read_size == 0 {
-                    break;
-                }
-            }
-            Ok((size as usize +2,total))
-        },
-        #[cfg(feature = "lzma-rs")]
-        Compressor::Xz => {
-            let mut buf_reader = BufReader::new(r.take(size.into()));
-            let mut buf_writer = Cursor::new(buf);
-            xz_decompress(&mut buf_reader, &mut buf_writer)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-            Ok((size as usize +2, buf_writer.position() as usize))
-        },
-        #[cfg(feature = "ruzstd")]
-        Compressor::Zstd => {
-            let mut dec = StreamingDecoder::new(r.take(size.into()))
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-            let mut total = 0;
-            while total < buf.len() {
-                let read_size = dec.read(&mut buf[total..])?;
-                total += read_size;
-                if read_size == 0 {
-                    break;
-                }
-            }
-            Ok((size as usize +2,total))
-        },
-        _ => Err(io::Error::from(io::ErrorKind::Unsupported))
-    }
+    // Set up a bounds so that we won't read more source data that the size or more uncompressed
+    // data than the target size
+    let max_read = min(buf.len(), METADATA_BLOCK_SIZE.into());
+    let mut reader = CompressedBlockReader::new(r, *c, size.into(), max_read as u64)?;
+    let mut writer = Cursor::new(buf);
+    let total = io::copy(&mut reader, &mut writer)?;
+
+    Ok(((size as usize) + 2, total as usize))
 }
 
 // This is a reader that wraps the Reader for a backing-store of compressed metadata blocks,
