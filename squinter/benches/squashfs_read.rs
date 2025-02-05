@@ -49,7 +49,7 @@ fn read_tree_ng(test_file: &str, content: bool) -> anyhow::Result<u32> {
     Ok(total)
 }
 
-fn read_and_descend_sqfs(sqfs: &mut squashfs::SquashFS<std::fs::File>, sq_inode: &squashfs::metadata::Inode, content: bool)
+fn read_and_descend_sqfs(sqfs: &mut squashfs::SquashFS<BufReader<std::fs::File>>, sq_inode: &squashfs::metadata::Inode, content: bool)
     -> anyhow::Result<u32>
 {
     assert!(sq_inode.is_dir());
@@ -99,8 +99,12 @@ fn root_benchmark(c: &mut Criterion) {
     prepare_test_files().unwrap();
     for comp in COMPRESSION_METHODS {
         let test_file = format!("{TEST_DATA_DIR}/test.{comp}.squashfs");
-        c.bench_function(&format!("{comp} - Sq Read Root Dir"), |b| b.iter(|| read_root_sqfs(&test_file)));
-        c.bench_function(&format!("{comp} - Ng Read Root Dir"), |b| b.iter(|| read_root_ng(&test_file)));
+        let group_name = format!("{comp} - Read Root Dir");
+        let mut group = c.benchmark_group(&group_name);
+        group.sample_size(100);
+        group.bench_function(&format!("Squinter"), |b| b.iter(|| read_root_sqfs(&test_file)));
+        group.bench_function(&format!("Squashfs-ng"), |b| b.iter(|| read_root_ng(&test_file)));
+        group.finish();
     }
 }
 
@@ -108,10 +112,11 @@ fn tree_benchmark(c: &mut Criterion) {
     prepare_test_files().unwrap();
     for comp in COMPRESSION_METHODS {
         let test_file = format!("{TEST_DATA_DIR}/test.{comp}.squashfs");
-        let mut group = c.benchmark_group("full-tree-read");
+        let group_name = format!("{comp} - Read Tree");
+        let mut group = c.benchmark_group(&group_name);
         group.sample_size(100);
-        group.bench_function(&format!("{comp} - Sq Read Tree"), |b| b.iter(|| read_tree_sqfs(&test_file, false)));
-        group.bench_function(&format!("{comp} - Ng Read Tree"), |b| b.iter(|| read_tree_ng(&test_file, false)));
+        group.bench_function(&format!("Squinter"), |b| b.iter(|| read_tree_sqfs(&test_file, false)));
+        group.bench_function(&format!("Squashfs-ng"), |b| b.iter(|| read_tree_ng(&test_file, false)));
         group.finish();
     }
 }
@@ -120,10 +125,11 @@ fn data_benchmark(c: &mut Criterion) {
     prepare_test_files().unwrap();
     for comp in COMPRESSION_METHODS {
         let test_file = format!("{TEST_DATA_DIR}/test.{comp}.squashfs");
-        let mut group = c.benchmark_group("full-data-read");
-        group.sample_size(20);
-        group.bench_function(&format!("{comp} - Sq Read Content"), |b| b.iter(|| read_tree_sqfs(&test_file, true)));
-        group.bench_function(&format!("{comp} - Ng Read Content"), |b| b.iter(|| read_tree_ng(&test_file, true)));
+        let group_name = format!("{comp} - Read Files");
+        let mut group = c.benchmark_group(&group_name);
+        group.sample_size(10);
+        group.bench_function(&format!("Squinter"), |b| b.iter(|| read_tree_sqfs(&test_file, true)));
+        group.bench_function(&format!("Squashfs-ng"), |b| b.iter(|| read_tree_ng(&test_file, true)));
         group.finish();
     }
 }

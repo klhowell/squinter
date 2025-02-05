@@ -2,7 +2,7 @@
 //! for details on the SquashFS binary format
 
 use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io::{self, BufReader, Read, Seek, SeekFrom};
 use std::path::{Component, Path};
 use std::boxed::Box;
 
@@ -21,12 +21,12 @@ pub struct SquashFS<R> {
     pub(crate) id_table: metadata::IdLookupTable,
 }
 
-impl SquashFS<File> {
-    /// Open the contents of a filepath as a SquashFS
+impl SquashFS<BufReader<File>> {
+    /// Open the contents of a filepath as a SquashFS, using a BufReader
     pub fn open<P>(path: P) -> io::Result<Self>
     where P: AsRef<Path>
     {
-        Self::new(File::open(path)?)
+        Self::new(BufReader::new(File::open(path)?))
     }
 }
 

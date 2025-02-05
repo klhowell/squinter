@@ -100,7 +100,7 @@ fn test_tree(c: &str) -> anyhow::Result<()> {
 }
 
 fn compare_and_descend(
-    sqfs: &mut squashfs::SquashFS<std::fs::File>, sq_inode: &squashfs::metadata::Inode,
+    sqfs: &mut squashfs::SquashFS<BufReader<std::fs::File>>, sq_inode: &squashfs::metadata::Inode,
     archive: &read::Archive, ng_inode: read::Node<'_>)
     -> anyhow::Result<u32>
 {
@@ -131,7 +131,7 @@ fn compare_and_descend(
     Ok(total)
 }
 
-fn compare_inode(sqfs: &mut squashfs::SquashFS<std::fs::File>,
+fn compare_inode(sqfs: &mut squashfs::SquashFS<BufReader<std::fs::File>>,
     sq: &squashfs::metadata::Inode, ng: &read::Node<'_>) -> anyhow::Result<()>
 {
     assert_eq!(sq.inode_number(), ng.id());

@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io;
+use std::io::{self, BufReader};
 use std::path::{Path, PathBuf};
 
 use clap::Parser;
@@ -55,7 +55,7 @@ fn list_filesystem(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn print_and_descend_dir(sqfs: &mut SquashFS<File>, files: &Vec<PathBuf>, parent: &Path, d: &DirEntry) -> Result<(), Box<dyn std::error::Error>> {
+fn print_and_descend_dir(sqfs: &mut SquashFS<BufReader<File>>, files: &Vec<PathBuf>, parent: &Path, d: &DirEntry) -> Result<(), Box<dyn std::error::Error>> {
     let path = parent.join(d.file_name());
 
     if !files.iter().any(|p| path.starts_with(p) || p.starts_with(&path)) {
@@ -91,7 +91,7 @@ fn cat_files(args: &Args) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn cat_and_descend_dir(sqfs: &mut SquashFS<File>, files: &Vec<PathBuf>, parent: &Path, d: &DirEntry) -> Result<(), Box<dyn std::error::Error>> {
+fn cat_and_descend_dir(sqfs: &mut SquashFS<BufReader<File>>, files: &Vec<PathBuf>, parent: &Path, d: &DirEntry) -> Result<(), Box<dyn std::error::Error>> {
     let path = parent.join(d.file_name());
 
     if !files.iter().any(|p| path.starts_with(p) || p.starts_with(&path)) {
