@@ -1,13 +1,13 @@
 use std::time::Duration;
-use std::io::{Read, Seek, BufReader};
+use std::io::{Read, Seek};
 use std::path::Path;
 
 use anyhow;
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{criterion_group, criterion_main, Criterion, BatchSize};
 use test_assets_ureq::{TestAssetDef, dl_test_files_backoff};
 
-use squashfs_ng::read;
-use squinter::squashfs;
+use squashfs_ng::read::{self, Archive};
+use squinter::squashfs::{self, SquashFS};
 const TEST_DATA_DIR: &str = "../test_data";
 const TEST_IMG_SRC: &str = "https://downloads.openwrt.org/releases/23.05.5/targets/layerscape/armv8_64b";
 const TEST_IMG_NAME: &str = "openwrt-23.05.5-layerscape-armv8_64b-fsl_ls1012a-rdb-squashfs-firmware.bin";
@@ -49,7 +49,7 @@ fn read_tree_ng(test_file: &str, content: bool) -> anyhow::Result<u32> {
     Ok(total)
 }
 
-fn read_and_descend_sqfs(sqfs: &mut squashfs::SquashFS<BufReader<std::fs::File>>, sq_inode: &squashfs::metadata::Inode, content: bool)
+fn read_and_descend_sqfs<R: Read + Seek>(sqfs: &mut squashfs::SquashFS<R>, sq_inode: &squashfs::metadata::Inode, content: bool)
     -> anyhow::Result<u32>
 {
     assert!(sq_inode.is_dir());
@@ -60,7 +60,7 @@ fn read_and_descend_sqfs(sqfs: &mut squashfs::SquashFS<BufReader<std::fs::File>>
     for de in sqfs_dir {
         let sq_inode = sqfs.inode_from_entryref(de.inode_ref())?;
         if content && sq_inode.is_file() {
-            let mut sq_reader = BufReader::new(sqfs.open_file_inode(&sq_inode)?);
+            let mut sq_reader = sqfs.open_file_inode(&sq_inode)?;
             std::io::copy(&mut sq_reader, &mut std::io::sink())?;
         }
         // If the inode represents a directory, recurse to the directory contents
@@ -83,7 +83,7 @@ fn read_and_descend_ng(archive: &read::Archive, ng_inode: read::Node<'_>, conten
     for r in archive_dir {
         let node = r?;
         if content && node.is_file()? {
-            let mut ng_reader = BufReader::new(node.as_file()?);
+            let mut ng_reader = node.as_file()?;
             std::io::copy(&mut ng_reader, &mut std::io::sink())?;
         }
         // If the inode represents a directory, recurse to compare the directory contents
@@ -92,6 +92,19 @@ fn read_and_descend_ng(archive: &read::Archive, ng_inode: read::Node<'_>, conten
         }
         total += 1;
     }
+    Ok(total)
+}
+
+fn read_single_sqfs<R: Read + Seek>(sqfs: &mut squashfs::SquashFS<R>, path: &Path) -> anyhow::Result<u64> {
+    let mut r = sqfs.open_file(path)?;
+    let total = std::io::copy(&mut r, &mut std::io::sink())?;
+    Ok(total)
+}
+
+fn read_single_ng(archive: &read::Archive, path: &Path) -> anyhow::Result<u64> {
+    let node = archive.get_exists(path)?;
+    let mut r = node.as_file()?;
+    let total = std::io::copy(&mut r, &mut std::io::sink())?;
     Ok(total)
 }
 
@@ -115,8 +128,10 @@ fn tree_benchmark(c: &mut Criterion) {
         let group_name = format!("{comp} - Read Tree");
         let mut group = c.benchmark_group(&group_name);
         group.sample_size(100);
-        group.bench_function(&format!("Squinter"), |b| b.iter(|| read_tree_sqfs(&test_file, false)));
-        group.bench_function(&format!("Squashfs-ng"), |b| b.iter(|| read_tree_ng(&test_file, false)));
+        group.bench_function(&format!("Squinter"), |b|
+            b.iter(|| read_tree_sqfs(&test_file, false)));
+        group.bench_function(&format!("Squashfs-ng"), |b|
+            b.iter(|| read_tree_ng(&test_file, false)));
         group.finish();
     }
 }
@@ -128,13 +143,69 @@ fn data_benchmark(c: &mut Criterion) {
         let group_name = format!("{comp} - Read Files");
         let mut group = c.benchmark_group(&group_name);
         group.sample_size(10);
-        group.bench_function(&format!("Squinter"), |b| b.iter(|| read_tree_sqfs(&test_file, true)));
-        group.bench_function(&format!("Squashfs-ng"), |b| b.iter(|| read_tree_ng(&test_file, true)));
+        group.bench_function(&format!("Squinter"), |b|
+            b.iter(|| read_tree_sqfs(&test_file, true)));
+        group.bench_function(&format!("Squashfs-ng"), |b|
+            b.iter(|| read_tree_ng(&test_file, true)));
         group.finish();
     }
 }
 
-criterion_group!(benches, root_benchmark, tree_benchmark, data_benchmark);
+fn single_file_benchmark(c: &mut Criterion) {
+    prepare_test_files().unwrap();
+    //let p = Path::new("/lib/libc.so");
+    let p = Path::new("/www/luci-static/resources/fs.js");
+    for comp in COMPRESSION_METHODS {
+        let test_file = format!("{TEST_DATA_DIR}/test.{comp}.squashfs");
+        let group_name = format!("{comp} - Read Single");
+        let mut group = c.benchmark_group(&group_name);
+        group.sample_size(10);
+        group.bench_function(&format!("Squinter"), |b|
+            b.iter_batched(||
+                SquashFS::open(&test_file).unwrap(),
+                |mut sqfs| read_single_sqfs(&mut sqfs, p).unwrap(),
+                BatchSize::PerIteration));
+
+        group.bench_function(&format!("Squashfs-ng"), |b|
+            b.iter_batched(||
+                Archive::open(&test_file).unwrap(),
+                |mut ng| read_single_ng(&mut ng, p).unwrap(),
+                BatchSize::PerIteration));
+        group.finish();
+    }
+}
+
+fn partial_tree_benchmark(c: &mut Criterion) {
+    prepare_test_files().unwrap();
+    //let p = Path::new("/lib");
+    let p = Path::new("/www/luci-static/resources");
+    for comp in COMPRESSION_METHODS {
+        let test_file = format!("{TEST_DATA_DIR}/test.{comp}.squashfs");
+        let group_name = format!("{comp} - Partial Tree");
+        let mut group = c.benchmark_group(&group_name);
+        group.sample_size(10);
+        group.bench_function(&format!("Squinter"), |b|
+            b.iter_batched(||
+                SquashFS::open(&test_file).unwrap(),
+                |mut sqfs| {
+                    let i = sqfs.inode_from_path(p).unwrap();
+                    read_and_descend_sqfs(&mut sqfs, &i, true).unwrap();
+                },
+                BatchSize::PerIteration));
+
+        group.bench_function(&format!("Squashfs-ng"), |b|
+            b.iter_batched(||
+                Archive::open(&test_file).unwrap(),
+                |ng| {
+                    let n = ng.get_exists(p).unwrap();
+                    read_and_descend_ng(&ng, n, true).unwrap();
+                },
+                BatchSize::PerIteration));
+        group.finish();
+    }
+}
+
+criterion_group!(benches, root_benchmark, tree_benchmark, data_benchmark, single_file_benchmark, partial_tree_benchmark);
 criterion_main!(benches);
 
 fn prepare_test_files() -> std::io::Result<()> {
