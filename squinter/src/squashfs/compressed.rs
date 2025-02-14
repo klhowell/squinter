@@ -32,6 +32,9 @@ impl<R: Read> CompressedBlockReader<R> {
     pub fn new(r: R, comp: Compressor, compressed_size: u64, uncompressed_size: u64) -> io::Result<Self> {
         let block_reader = r.take(compressed_size);
         Ok(match comp {
+            Compressor::None => {
+                CompressedBlockReader::Uncompressed(block_reader)
+            },
             #[cfg(feature = "flate2")]
             Compressor::Gzip => {
                 let dec = ZlibDecoder::new(block_reader).take(uncompressed_size);

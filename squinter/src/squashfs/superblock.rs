@@ -58,6 +58,7 @@ pub enum Compressor {
     Xz = 4,
     Lz4 = 5,
     Zstd = 6,
+    None = 0xFFFE,
     #[num_enum(default)]
     Unknown = 0xFFFF,
 }

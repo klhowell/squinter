@@ -1,3 +1,4 @@
+mod block;
 mod compressed;
 mod squashfs;
 mod filedata;
