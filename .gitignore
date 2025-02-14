@@ -1,2 +1,7 @@
 /target/
 /test_data/
+/.vscode/
+
+/*.svg
+/perf.data
+/perf.data.old
