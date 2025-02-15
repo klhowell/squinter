@@ -1,4 +1,5 @@
 use std::io::{self, BufReader, Read, Take, Cursor};
+use std::fmt::Debug;
 use std::mem;
 
 #[cfg(feature = "flate2")]
@@ -25,6 +26,19 @@ where
     Gzip(Take<ZlibDecoder<Take<R>>>),
     #[cfg(feature = "ruzstd")]
     Zstd(Take<StreamingDecoder<Take<R>, FrameDecoder>>),
+}
+
+impl<R: Read> Debug for CompressedBlockReader<R> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::None => write!(f, "None"),
+            Self::Base(_) => write!(f, "Base"),
+            Self::Uncompressed(_) => write!(f, "Uncompressed"),
+            Self::Buffer(_) => write!(f, "Buffer"),
+            Self::Gzip(_) => write!(f, "Gzip"),
+            Self::Zstd(_) => write!(f, "Zstd"),
+        }
+    }
 }
 
 #[allow(dead_code)]

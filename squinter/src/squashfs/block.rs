@@ -10,6 +10,7 @@ use super::superblock::Compressor;
 /// external reader, but the inner reader is read and appended to the Cursor whenever the requested
 /// read would advance beyond the end of the Cursor's data.
 /// When BorrowedBuf comes off nightly, it may be appropriate to use for this.
+#[derive(Debug)]
 struct CachingReader<R: Read> {
     inner: R,
     cache: Cursor<Vec<u8>>,
@@ -58,6 +59,7 @@ impl<R:Read> Seek for CachingReader<R> {
 /// A store of fragment blocks. Users can request a specific fragment by block, offset, and length
 /// The cache will provide a reader that is backed by the memory buffer and will read additional
 /// data from the inner reader as needed to fulfill reads.
+#[derive(Debug)]
 struct FragmentBlockCache<R: Read + Seek> {
     inner: ReaderMux<R>,
     block_readers: HashMap<u64, ReaderMux<CachingReader<CompressedBlockReader<ReaderClient<R>>>>>,
@@ -97,6 +99,7 @@ impl<R:Read+Seek> FragmentBlockCache<R> {
 }
 
 /// A fragment reader is a single-fragment view of a portion of a fragment block
+#[derive(Debug)]
 struct FragmentReader<R: Read + Seek> {
     inner: R, // the backing reader
     offset: u64, // offset of the beginning of this reader within the inner reader
