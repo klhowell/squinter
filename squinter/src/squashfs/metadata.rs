@@ -703,13 +703,13 @@ impl Inode {
         mode
     }
 
-    pub fn uid<A>(&self, sqfs: &super::SquashFS<A>) -> io::Result<u32> {
+    pub fn uid<R:Read+Seek>(&self, sqfs: &super::SquashFS<R>) -> io::Result<u32> {
         let id_table = &sqfs.id_table;
         id_table.lu_table.entries.get(self.uid_index as usize).cloned()
         .ok_or(io::Error::from(io::ErrorKind::NotFound))
     }
 
-    pub fn gid<A>(&self, sqfs: &super::SquashFS<A>) -> io::Result<u32> {
+    pub fn gid<R:Read+Seek>(&self, sqfs: &super::SquashFS<R>) -> io::Result<u32> {
         let id_table = &sqfs.id_table;
         id_table.lu_table.entries.get(self.gid_index as usize).cloned()
         .ok_or(io::Error::from(io::ErrorKind::NotFound))

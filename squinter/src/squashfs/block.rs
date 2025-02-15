@@ -11,7 +11,7 @@ use super::superblock::Compressor;
 /// read would advance beyond the end of the Cursor's data.
 /// When BorrowedBuf comes off nightly, it may be appropriate to use for this.
 #[derive(Debug)]
-struct CachingReader<R: Read> {
+pub struct CachingReader<R> {
     inner: R,
     cache: Cursor<Vec<u8>>,
 }
@@ -60,26 +60,28 @@ impl<R:Read> Seek for CachingReader<R> {
 /// The cache will provide a reader that is backed by the memory buffer and will read additional
 /// data from the inner reader as needed to fulfill reads.
 #[derive(Debug)]
-struct FragmentBlockCache<R: Read + Seek> {
+pub struct FragmentBlockCache<R: Read+Seek> {
     inner: ReaderMux<R>,
+    compressor: Compressor,
     block_readers: HashMap<u64, ReaderMux<CachingReader<CompressedBlockReader<ReaderClient<R>>>>>,
 }
 
 impl<R:Read+Seek> FragmentBlockCache<R> {
-    pub fn new(inner: R) -> Self {
+    pub fn new(inner: R, compressor: Compressor) -> Self {
         Self {
             inner: ReaderMux::new(inner),
+            compressor,
             block_readers: HashMap::new(),
         }
     }
 
-    pub fn get_fragment_reader(&mut self, c: Compressor, block_addr: u64, block_size: u64, block_uncompressed_size: u64, offset: u64, len: u64)
+    pub fn get_fragment_reader(&mut self, block_addr: u64, block_size: u64, block_uncompressed_size: u64, offset: u64, len: u64)
         -> io::Result<FragmentReader<ReaderClient<CachingReader<CompressedBlockReader<ReaderClient<R>>>>>>
     {
         let block_reader = match self.block_readers.get_mut(&block_addr) {
             Some(r) => r,
             None => {
-                let r = self.create_block_reader(c, block_addr, block_size, block_uncompressed_size)?;
+                let r = self.create_block_reader(block_addr, block_size, block_uncompressed_size)?;
                 self.block_readers.insert(block_addr, r);
                 self.block_readers.get_mut(&block_addr).unwrap()
             },
@@ -87,12 +89,12 @@ impl<R:Read+Seek> FragmentBlockCache<R> {
         FragmentReader::new(block_reader.client(), offset, len)
     }
 
-    fn create_block_reader(&mut self, c: Compressor, block_addr: u64, block_size: u64, uncompressed_size: u64)
+    fn create_block_reader(&mut self, block_addr: u64, block_size: u64, uncompressed_size: u64)
         -> io::Result<ReaderMux<CachingReader<CompressedBlockReader<ReaderClient<R>>>>>
     {
         let mut client_reader = self.inner.client();
         client_reader.seek(SeekFrom::Start(block_addr))?;
-        let compressed_reader = CompressedBlockReader::new(client_reader, c, block_size, uncompressed_size)?;
+        let compressed_reader = CompressedBlockReader::new(client_reader, self.compressor, block_size, uncompressed_size)?;
         let caching_reader = CachingReader::new_with_capacity(compressed_reader, block_size as usize);
         Ok(ReaderMux::new(caching_reader))
     }
@@ -100,7 +102,7 @@ impl<R:Read+Seek> FragmentBlockCache<R> {
 
 /// A fragment reader is a single-fragment view of a portion of a fragment block
 #[derive(Debug)]
-struct FragmentReader<R: Read + Seek> {
+pub struct FragmentReader<R> {
     inner: R, // the backing reader
     offset: u64, // offset of the beginning of this reader within the inner reader
     len: u64, // length of this reader
@@ -201,11 +203,11 @@ mod tests {
     fn test_block_cache() -> io::Result<()> {
         let data: Vec<u8> = (0..=255).collect();
         let backing_reader = Cursor::new((0..=255).collect::<Vec<u8>>());
-        let mut block_cache = FragmentBlockCache::new(backing_reader);
+        let mut block_cache = FragmentBlockCache::new(backing_reader, Compressor::None);
         let mut buf = [0; 8];
 
-        let mut frag_reader1 = block_cache.get_fragment_reader(Compressor::None, 32, 32, 32, 8, 16)?;
-        let mut frag_reader2 = block_cache.get_fragment_reader(Compressor::None, 0, 32, 32, 0, 32)?;
+        let mut frag_reader1 = block_cache.get_fragment_reader(32, 32, 32, 8, 16)?;
+        let mut frag_reader2 = block_cache.get_fragment_reader(0, 32, 32, 0, 32)?;
 
         assert_eq!(frag_reader1.read(&mut buf)?, buf.len());
         println!("Read {:?}", &buf);

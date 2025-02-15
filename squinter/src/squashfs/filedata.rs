@@ -1,17 +1,20 @@
 use std::io;
 use std::io::{Read, Seek, SeekFrom};
 
+use super::block::{CachingReader, FragmentBlockCache, FragmentReader};
 use super::metadata::{self, FragmentEntry, Inode, InodeExtendedInfo};
+use super::readermux::ReaderClient;
 use super::superblock::{Superblock, Compressor};
 use super::compressed::CompressedBlockReader;
 
 #[derive(PartialEq)]
-struct FileBlockInfo {
+struct FileBlockInfo<R> {
     disk_offset: u64,
     disk_len: u32,
     data_offset: u32,       // How far into this block the file data starts (only applies to tail-ends)
     data_len: u32,          // Amount of uncompressed file data in this block
     is_compressed: bool,
+    reader: Option<R>,
 }
 
 // TODO: TailEnd support
@@ -31,20 +34,19 @@ struct TailEnd {
 /// 
 /// The stream position can be calculated from file position of the current block + the amount
 /// already read from that block.
-pub struct FileDataReader<R: Read> {
+pub struct FileDataReader<R: Read + Seek> {
     inner: CompressedBlockReader<R>,
     pos: u64,
     comp: Compressor,
     block_size: u32,
     file_size: u64,
-    blocks: Vec<FileBlockInfo>,
+    blocks: Vec<FileBlockInfo<FragmentReader<ReaderClient<CachingReader<CompressedBlockReader<ReaderClient<R>>>>>>>,
 }
 
 impl<R: Read + Seek> FileDataReader<R> {
-    pub fn from_inode<MDR>(mut inner: R, _md_reader: &mut MDR, sb: &Superblock, inode: &Inode) -> io::Result<Option<Self>>
+    pub fn from_inode<MDR>(inner: R, md_reader: &mut MDR, sb: &Superblock, frag_cache: &mut FragmentBlockCache<R>, inode: &Inode) -> io::Result<Option<Self>>
     where MDR: Read + Seek
     {
-        // TODO: What was md_reader intended for?
         let pos = 0;
         let comp = sb.compressor;
         let block_size = sb.block_size;
@@ -67,12 +69,13 @@ impl<R: Read + Seek> FileDataReader<R> {
                         data_offset: 0,
                         data_len: data_len,
                         is_compressed: (b & 0x1000000) == 0,
+                        reader: None,
                     });
                     offset += u64::from(*b);
                     remaining -= u64::from(data_len);
                 }
                 if i.frag_index != u32::MAX {
-                    let ft = metadata::FragmentLookupTable::read(&mut inner, sb)?;
+                    let ft = metadata::FragmentLookupTable::read(md_reader, sb)?;
                     let f: &FragmentEntry = &ft.lu_table.entries[i.frag_index as usize];
                     blocks.push( FileBlockInfo {
                         disk_offset: f.start,
@@ -80,6 +83,8 @@ impl<R: Read + Seek> FileDataReader<R> {
                         data_offset: i.block_offset,
                         data_len: i.file_size % block_size,
                         is_compressed: (f.size & 0x1000000) == 0,
+                        // Note, block_size is not the uncompressed size; it is the maximum uncompressed size
+                        reader: Some(frag_cache.get_fragment_reader(f.start, (f.size & 0xFFFFFF).into(), block_size.into(), i.block_offset.into(), (i.file_size & block_size).into())?)
                     });
                 }
                 Ok(Some(FileDataReader {
@@ -97,19 +102,18 @@ impl<R: Read + Seek> FileDataReader<R> {
     /** Get the block and (uncompressed) data offset within the block for a given file offset.
      *  Also return the amount of (uncompressed) data left in the block
      */
-    fn calc_block_and_offset(&self, pos: u64) -> Option<(&FileBlockInfo, u32, u32)> {
+    fn calc_block_and_offset(&self, pos: u64) -> Option<(&FileBlockInfo<FragmentReader<ReaderClient<CachingReader<CompressedBlockReader<ReaderClient<R>>>>>>, u32, u32)> {
         if pos >= self.file_size {
             return None;
         }
         let block_index = pos / (self.block_size as u64);
         let data_offset = (pos % (self.block_size as u64)) as u32;
 
-        let b: &FileBlockInfo = &self.blocks[block_index as usize];
-        Some((&b, b.data_offset + data_offset, b.data_len - data_offset))
+        let b = &self.blocks[block_index as usize];
+        Some((b, b.data_offset + data_offset, b.data_len - data_offset))
     }
 
     /// Do whatever is necessary to make the inner reader's next read come from self.pos
-    /// TODO: Handle EOF -- currently panics when you read to the end of the file
     fn prepare_inner(&mut self) -> io::Result<()> {
         // First close any existing block reader
         let inner = CompressedBlockReader::take(&mut self.inner);
@@ -179,7 +183,7 @@ impl<R: Read + Seek> Seek for FileDataReader<R> {
         let (cur_block, cur_data_offset, _) = self.calc_block_and_offset(self.pos).unwrap();
         let (target_block, target_data_offset, _) = self.calc_block_and_offset(target_pos).unwrap();
 
-        if cur_block == target_block && cur_data_offset <= target_data_offset {
+        if std::ptr::eq(cur_block,target_block) && cur_data_offset <= target_data_offset {
             // Seeking later in the same block. No need to restart the block. Just read ahead.
             // TODO: For uncompressed blocks, a fresh seek is probably faster
             let distance = target_data_offset - cur_data_offset;

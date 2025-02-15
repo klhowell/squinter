@@ -8,15 +8,17 @@ use std::boxed::Box;
 
 use super::filedata::FileDataReader;
 use super::metadata::{self, CachingMetadataReader};
+use super::block::FragmentBlockCache;
 use super::readermux::{ReaderMux, ReaderClient};
 use super::superblock::Superblock;
 
 /// The top-level interface to a SquashFS filesystem. This struct can be used to look up Inodes,
 /// list directory contents, and open file data readers.
 #[derive(Debug)]
-pub struct SquashFS<R> {
+pub struct SquashFS<R:Read+Seek> {
     reader_mux: Box<ReaderMux<R>>,
     md_reader: CachingMetadataReader<ReaderClient<R>>,
+    frag_cache: FragmentBlockCache<ReaderClient<R>>,
     sb: Superblock,
     pub(crate) id_table: metadata::IdLookupTable,
 }
@@ -39,7 +41,8 @@ impl<R: Read + Seek> SquashFS<R> {
         let id_table = metadata::IdLookupTable::read(&mut r, &sb)?;
         let mut reader_mux = Box::new(ReaderMux::new(r));
         let md_reader = CachingMetadataReader::new(reader_mux.client(), sb.compressor);
-        Ok(SquashFS { reader_mux, md_reader, sb, id_table })
+        let frag_cache = FragmentBlockCache::new(reader_mux.client(), sb.compressor);
+        Ok(SquashFS { reader_mux, md_reader, frag_cache, sb, id_table })
     }
 
     /// Retrieve an iterator that walks the dirents within a directory specified by the given
@@ -75,7 +78,7 @@ impl<R: Read + Seek> SquashFS<R> {
     {
         let inode = self.inode_from_path(path)?;
         let reader = self.reader_mux.client();
-        Ok(FileDataReader::from_inode(reader, &mut self.md_reader, &self.sb, &inode)?.unwrap())
+        Ok(FileDataReader::from_inode(reader, &mut self.md_reader, &self.sb, &mut self.frag_cache, &inode)?.unwrap())
     }
 
     /// Create an IO reader for the contents of the file specified by the given DirEntry
@@ -83,13 +86,13 @@ impl<R: Read + Seek> SquashFS<R> {
     {
         let inode = self.inode_from_entryref(dir_entry.inode_ref)?;
         let reader = self.reader_mux.client();
-        Ok(FileDataReader::from_inode(reader, &mut self.md_reader, &self.sb, &inode)?.unwrap())
+        Ok(FileDataReader::from_inode(reader, &mut self.md_reader, &self.sb, &mut self.frag_cache, &inode)?.unwrap())
     }
 
     /// Create an IO reader for the contents of the file specified by the given Inode
     pub fn open_file_inode(&mut self, inode: &metadata::Inode) -> io::Result<FileDataReader<ReaderClient<R>>> {
         let reader = self.reader_mux.client();
-        Ok(FileDataReader::from_inode(reader, &mut self.md_reader, &self.sb, inode)?.unwrap())
+        Ok(FileDataReader::from_inode(reader, &mut self.md_reader, &self.sb, &mut self.frag_cache, inode)?.unwrap())
     }
 
     /// Retrieve the root Inode of the SquashFS. This corresponds to the '/' directory

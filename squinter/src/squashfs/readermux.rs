@@ -3,13 +3,13 @@ use std::cell::{RefCell, RefMut};
 use std::rc::Rc;
 
 #[derive(Debug)]
-pub struct ReaderMux<R> {
+pub struct ReaderMux<R:Read> {
     inner: Rc<RefCell<SharedReader<R>>>,
     next_client_id: usize,
 }
 
 #[derive(Debug)]
-pub struct SharedReader<R> {
+pub struct SharedReader<R:Read> {
     inner: R,
     active_id: usize,
 }
@@ -36,7 +36,7 @@ where R: Read + Seek
 }
 
 #[derive(Debug)]
-pub struct ReaderClient<R> {
+pub struct ReaderClient<R:Read> {
     inner: Rc<RefCell<SharedReader<R>>>,
     id: usize,
     pos: u64,
