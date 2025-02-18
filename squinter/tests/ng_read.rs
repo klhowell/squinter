@@ -145,8 +145,7 @@ fn compare_inode(sqfs: &mut squashfs::SquashFS<BufReader<std::fs::File>>,
     if sq.is_file() {
         let sq_reader = BufReader::new(sqfs.open_file_inode(sq)?);
         let ng_reader = BufReader::new(ng.as_file()?);
-        assert!(ng_reader.bytes().zip(sq_reader.bytes())
-            .all(|(a, b)| a.unwrap() == b.unwrap()))
+        assert!(ng_reader.bytes().map(|r| r.unwrap()).eq(sq_reader.bytes().map(|r| r.unwrap())));
     }
 
     Ok(())
