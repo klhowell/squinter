@@ -7,6 +7,7 @@ use super::readermux::{ReaderClient, ReaderMux};
 use super::superblock::{Superblock, Compressor};
 use super::compressed::CompressedBlockReader;
 
+#[allow(dead_code)]
 struct FileBlockInfo<R> {
     disk_offset: u64,
     disk_len: u32,
@@ -26,7 +27,6 @@ struct TailEnd {
 enum BlockReader<R> {
     Block(CachingReader<CompressedBlockReader<ReaderClient<R>>>),
     Fragment(FragmentReader<ReaderClient<CachingReader<CompressedBlockReader<ReaderClient<R>>>>>),
-    None,
 }
 
 impl<R: Read + Seek> Read for BlockReader<R> {
@@ -34,7 +34,6 @@ impl<R: Read + Seek> Read for BlockReader<R> {
         match self {
             BlockReader::Block(r) => r.read(buf),
             BlockReader::Fragment(r) => r.read(buf),
-            BlockReader::None => Err(io::Error::from(io::ErrorKind::InvalidData)),
         }
     }
 }
@@ -44,7 +43,6 @@ impl<R: Seek> Seek for BlockReader<R> {
         match self {
             BlockReader::Block(r) => r.seek(pos),
             BlockReader::Fragment(r) => r.seek(pos),
-            BlockReader::None => Err(io::Error::from(io::ErrorKind::InvalidData)),
         }
     }
 }
@@ -62,7 +60,6 @@ impl<R: Seek> Seek for BlockReader<R> {
 pub struct FileDataReader<R: Read + Seek> {
     inner: ReaderMux<R>,
     pos: u64,
-    comp: Compressor,
     block_size: u32,
     file_size: u64,
     blocks: Vec<FileBlockInfo<R>>,
@@ -118,7 +115,7 @@ impl<R: Read + Seek> FileDataReader<R> {
                     });
                 }
                 Ok(Some(FileDataReader {
-                    inner, pos, comp, block_size, file_size, blocks, 
+                    inner, pos, block_size, file_size, blocks, 
                 }))
             }
             _ => Ok(None),
@@ -145,37 +142,6 @@ impl<R: Read + Seek> FileDataReader<R> {
         let b = &mut self.blocks[block_index as usize];
         Some((b, offset, remaining))
     }
-
-    /*
-    /// Do whatever is necessary to make the inner reader's next read come from self.pos
-    fn prepare_inner(&mut self) -> io::Result<()> {
-        // First close any existing block reader
-        let inner = CompressedBlockReader::take(&mut self.inner);
-        let inner = inner.into_base();
-
-        // Figure out which block to open
-        let (block, offset, data_remaining) = self.calc_block_and_offset(self.pos).ok_or(io::Error::from(io::ErrorKind::UnexpectedEof))?;
-        //eprintln!("Block Offset={}  Remaining={}", offset, data_remaining);
-
-        // Open a reader on the block and move to the correct inner offset
-        if let CompressedBlockReader::Base(mut r) = inner {
-            self.inner = if !block.is_compressed {
-                // For uncompressed blocks, we can directly seek to the target offset
-                r.seek(SeekFrom::Start(block.disk_offset + u64::from(offset)))?;
-                CompressedBlockReader::Uncompressed(r.take(data_remaining.into()))
-            } else {
-                // For compressed blocks, we must seek to the beginning of the block and then
-                // read/discard to the target offset.
-                r.seek(SeekFrom::Start(block.disk_offset))?;
-                let mut inner = CompressedBlockReader::new(r, self.comp, block.disk_len.into(), (offset+data_remaining).into())?;
-                io::copy(&mut Read::take(&mut inner, offset.into()), &mut io::sink())?;
-                inner
-            };
-            Ok(())
-        } else {
-            panic!("start_block: not Base reader");
-        }
-    } */
 }
 
 impl<R: Read + Seek> Read for FileDataReader<R> {
