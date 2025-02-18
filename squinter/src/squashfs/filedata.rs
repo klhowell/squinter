@@ -69,8 +69,7 @@ pub struct FileDataReader<R: Read + Seek> {
 }
 
 impl<R: Read + Seek> FileDataReader<R> {
-    pub fn from_inode<MDR>(inner: R, md_reader: &mut MDR, sb: &Superblock, frag_cache: &mut FragmentBlockCache<R>, inode: &Inode) -> io::Result<Option<Self>>
-    where MDR: Read + Seek
+    pub fn from_inode(inner: R, sb: &Superblock, frag_cache: &mut FragmentBlockCache<R>, inode: &Inode) -> io::Result<Option<Self>>
     {
         let pos = 0;
         let comp = sb.compressor;
