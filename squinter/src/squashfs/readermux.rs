@@ -3,13 +3,13 @@ use std::cell::{RefCell, RefMut};
 use std::rc::Rc;
 
 #[derive(Debug)]
-pub struct ReaderMux<R:Read> {
+pub struct ReaderMux<R> {
     inner: Rc<RefCell<SharedReader<R>>>,
     next_client_id: usize,
 }
 
 #[derive(Debug)]
-pub struct SharedReader<R:Read> {
+pub struct SharedReader<R> {
     inner: R,
     active_id: usize,
 }
@@ -33,17 +33,21 @@ where R: Read + Seek
             pos: 0,
         }
     }
+
+    pub fn into_inner(self) -> R {
+        Rc::into_inner(self.inner).unwrap().into_inner().inner
+    }
 }
 
 #[derive(Debug)]
-pub struct ReaderClient<R:Read> {
+pub struct ReaderClient<R> {
     inner: Rc<RefCell<SharedReader<R>>>,
     id: usize,
     pos: u64,
 }
 
 impl<R> ReaderClient<R>
-where R: Read + Seek
+where R: Seek
 {
     fn activate(&self, sr: &mut RefMut<SharedReader<R>>) -> std::io::Result<u64> {
         if sr.active_id != self.id {
@@ -72,7 +76,7 @@ where R: Read + Seek
 }
 
 impl<R> Seek for ReaderClient<R>
-where R: Read + Seek
+where R: Seek
 {
     fn seek(&mut self, pos: std::io::SeekFrom) -> std::io::Result<u64> {
         let mut sr = self.inner.borrow_mut();

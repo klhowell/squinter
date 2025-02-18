@@ -49,7 +49,7 @@ impl<R:Read> Read for CachingReader<R> {
     }
 }
 
-impl<R:Read> Seek for CachingReader<R> {
+impl<R> Seek for CachingReader<R> {
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
         self.cache.seek(pos)
     }
@@ -134,7 +134,7 @@ impl<R:Read+Seek> Read for FragmentReader<R> {
     }
 }
 
-impl<R:Read+Seek> Seek for FragmentReader<R> {
+impl<R:Seek> Seek for FragmentReader<R> {
     fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
         match pos {
             SeekFrom::Start(p) => {
