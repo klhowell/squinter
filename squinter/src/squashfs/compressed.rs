@@ -127,7 +127,7 @@ impl<R: Read> Read for CompressedBlockReader<R> {
 /// to propagate all over squinter's structs. Removing the constraint allows the Read constraint
 /// to be limited to impls.
 #[cfg(feature = "ruzstd")]
-struct ZstdDecoder<READ, DEC: BorrowMut<FrameDecoder>> {
+pub struct ZstdDecoder<READ, DEC: BorrowMut<FrameDecoder>> {
     decoder: DEC,
     source: READ,
 }
