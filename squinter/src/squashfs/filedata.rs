@@ -114,7 +114,7 @@ impl<R: Read + Seek> FileDataReader<R> {
                         data_len: i.file_size % block_size,
                         is_compressed: (f.size & 0x1000000) == 0,
                         // Note, block_size is not the uncompressed size; it is the maximum uncompressed size
-                        reader: BlockReader::Fragment(frag_cache.get_fragment_reader(f.start, (f.size & 0xFFFFFF).into(), block_size.into(), i.block_offset.into(), (i.file_size & block_size).into())?),
+                        reader: BlockReader::Fragment(frag_cache.get_fragment_reader(f.start, (f.size & 0xFFFFFF).into(), block_size.into(), i.block_offset.into(), (i.file_size % block_size).into())?),
                     });
                 }
                 Ok(Some(FileDataReader {
@@ -140,7 +140,7 @@ impl<R: Read + Seek> FileDataReader<R> {
         let data_offset = (pos % (self.block_size as u64)) as u32;
 
         let b = &self.blocks[block_index as usize];
-        let offset = b.data_offset + data_offset;
+        let offset = data_offset;
         let remaining = b.data_len - data_offset;
         let b = &mut self.blocks[block_index as usize];
         Some((b, offset, remaining))
