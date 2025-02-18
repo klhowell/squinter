@@ -1,3 +1,4 @@
+use std::borrow::BorrowMut;
 use std::io::{self, BufReader, Read, Take, Cursor};
 use std::fmt::Debug;
 use std::mem;
@@ -8,15 +9,15 @@ use flate2::read::ZlibDecoder;
 #[cfg(feature = "lzma-rs")]
 use lzma_rs::xz_decompress;
 
+use ruzstd::decoding::errors::FrameDecoderError;
+use ruzstd::decoding::BlockDecodingStrategy;
 #[cfg(feature = "ruzstd")]
-use ruzstd::decoding::{FrameDecoder, StreamingDecoder};
+use ruzstd::decoding::FrameDecoder;
 
 use super::superblock::Compressor;
 
 #[allow(dead_code)]
 pub enum CompressedBlockReader<R>
-where
-    R: Read,
 {
     None,
     Base(R),
@@ -25,7 +26,7 @@ where
     #[cfg(feature = "flate2")]
     Gzip(Take<ZlibDecoder<Take<R>>>),
     #[cfg(feature = "ruzstd")]
-    Zstd(Take<StreamingDecoder<Take<R>, FrameDecoder>>),
+    Zstd(Take<ZstdDecoder<Take<R>, FrameDecoder>>),
 }
 
 impl<R: Read> Debug for CompressedBlockReader<R> {
@@ -35,7 +36,9 @@ impl<R: Read> Debug for CompressedBlockReader<R> {
             Self::Base(_) => write!(f, "Base"),
             Self::Uncompressed(_) => write!(f, "Uncompressed"),
             Self::Buffer(_) => write!(f, "Buffer"),
+            #[cfg(feature = "flate2")]
             Self::Gzip(_) => write!(f, "Gzip"),
+            #[cfg(feature = "ruzstd")]
             Self::Zstd(_) => write!(f, "Zstd"),
         }
     }
@@ -72,7 +75,7 @@ impl<R: Read> CompressedBlockReader<R> {
             },
             #[cfg(feature = "ruzstd")]
             Compressor::Zstd => {
-                let dec = StreamingDecoder::new(block_reader)
+                let dec = ZstdDecoder::new(block_reader)
                     .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?
                     .take(uncompressed_size);
                 CompressedBlockReader::Zstd(dec)
@@ -117,4 +120,105 @@ impl<R: Read> Read for CompressedBlockReader<R> {
         }
     }
 
+}
+
+/// This struct is a near-copy of the StreamingDecoder from ruzstd. The only difference is the
+/// removal of the 'Read' constraint on generic R of the struct, which causes this constraint
+/// to propagate all over squinter's structs. Removing the constraint allows the Read constraint
+/// to be limited to impls.
+#[cfg(feature = "ruzstd")]
+pub struct ZstdDecoder<READ, DEC: BorrowMut<FrameDecoder>> {
+    pub decoder: DEC,
+    source: READ,
+}
+
+#[cfg(feature = "ruzstd")]
+impl<READ: Read, DEC: BorrowMut<FrameDecoder>> ZstdDecoder<READ, DEC> {
+    pub fn new_with_decoder(
+        mut source: READ,
+        mut decoder: DEC,
+    ) -> Result<ZstdDecoder<READ, DEC>, FrameDecoderError> {
+        decoder.borrow_mut().init(&mut source)?;
+        Ok(ZstdDecoder { decoder, source })
+    }
+}
+
+#[cfg(feature = "ruzstd")]
+impl<READ: Read> ZstdDecoder<READ, FrameDecoder> {
+    pub fn new(
+        mut source: READ,
+    ) -> Result<ZstdDecoder<READ, FrameDecoder>, FrameDecoderError> {
+        let mut decoder = FrameDecoder::new();
+        decoder.init(&mut source)?;
+        Ok(ZstdDecoder { decoder, source })
+    }
+}
+
+#[cfg(feature = "ruzstd")]
+impl<READ: Read, DEC: BorrowMut<FrameDecoder>> ZstdDecoder<READ, DEC> {
+    /// Gets a reference to the underlying reader.
+    pub fn get_ref(&self) -> &READ {
+        &self.source
+    }
+
+    /// Gets a mutable reference to the underlying reader.
+    ///
+    /// It is inadvisable to directly read from the underlying reader.
+    pub fn get_mut(&mut self) -> &mut READ {
+        &mut self.source
+    }
+
+    /// Destructures this object into the inner reader.
+    pub fn into_inner(self) -> READ
+    where
+        READ: Sized,
+    {
+        self.source
+    }
+
+    /// Destructures this object into both the inner reader and [FrameDecoder].
+    pub fn into_parts(self) -> (READ, DEC)
+    where
+        READ: Sized,
+    {
+        (self.source, self.decoder)
+    }
+
+    /// Destructures this object into the inner [FrameDecoder].
+    pub fn into_frame_decoder(self) -> DEC {
+        self.decoder
+    }
+}
+
+#[cfg(feature = "ruzstd")]
+impl<READ: Read, DEC: BorrowMut<FrameDecoder>> Read for ZstdDecoder<READ, DEC> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let decoder = self.decoder.borrow_mut();
+        if decoder.is_finished() && decoder.can_collect() == 0 {
+            //No more bytes can ever be decoded
+            return Ok(0);
+        }
+
+        // need to loop. The UpToBytes strategy doesn't take any effort to actually reach that limit.
+        // The first few calls can result in just filling the decode buffer but these bytes can not be collected.
+        // So we need to call this until we can actually collect enough bytes
+
+        // TODO add BlockDecodingStrategy::UntilCollectable(usize) that pushes this logic into the decode_blocks function
+        while decoder.can_collect() < buf.len() && !decoder.is_finished() {
+            //More bytes can be decoded
+            let additional_bytes_needed = buf.len() - decoder.can_collect();
+            match decoder.decode_blocks(
+                &mut self.source,
+                BlockDecodingStrategy::UptoBytes(additional_bytes_needed),
+            ) {
+                Ok(_) => { /*Nothing to do*/ }
+                Err(e) => {
+                    let err = io::Error::new(io::ErrorKind::Other, e);
+                    return Err(err);
+                }
+            }
+        }
+
+        decoder.read(buf)
+    }
 }
