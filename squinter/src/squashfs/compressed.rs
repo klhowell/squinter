@@ -127,25 +127,14 @@ impl<R: Read> Read for CompressedBlockReader<R> {
 /// to propagate all over squinter's structs. Removing the constraint allows the Read constraint
 /// to be limited to impls.
 #[cfg(feature = "ruzstd")]
-pub struct ZstdDecoder<READ, DEC: BorrowMut<FrameDecoder>> {
-    pub decoder: DEC,
+struct ZstdDecoder<READ, DEC: BorrowMut<FrameDecoder>> {
+    decoder: DEC,
     source: READ,
 }
 
 #[cfg(feature = "ruzstd")]
-impl<READ: Read, DEC: BorrowMut<FrameDecoder>> ZstdDecoder<READ, DEC> {
-    pub fn new_with_decoder(
-        mut source: READ,
-        mut decoder: DEC,
-    ) -> Result<ZstdDecoder<READ, DEC>, FrameDecoderError> {
-        decoder.borrow_mut().init(&mut source)?;
-        Ok(ZstdDecoder { decoder, source })
-    }
-}
-
-#[cfg(feature = "ruzstd")]
 impl<READ: Read> ZstdDecoder<READ, FrameDecoder> {
-    pub fn new(
+    fn new(
         mut source: READ,
     ) -> Result<ZstdDecoder<READ, FrameDecoder>, FrameDecoderError> {
         let mut decoder = FrameDecoder::new();
@@ -156,37 +145,12 @@ impl<READ: Read> ZstdDecoder<READ, FrameDecoder> {
 
 #[cfg(feature = "ruzstd")]
 impl<READ: Read, DEC: BorrowMut<FrameDecoder>> ZstdDecoder<READ, DEC> {
-    /// Gets a reference to the underlying reader.
-    pub fn get_ref(&self) -> &READ {
-        &self.source
-    }
-
-    /// Gets a mutable reference to the underlying reader.
-    ///
-    /// It is inadvisable to directly read from the underlying reader.
-    pub fn get_mut(&mut self) -> &mut READ {
-        &mut self.source
-    }
-
     /// Destructures this object into the inner reader.
-    pub fn into_inner(self) -> READ
+    fn into_inner(self) -> READ
     where
         READ: Sized,
     {
         self.source
-    }
-
-    /// Destructures this object into both the inner reader and [FrameDecoder].
-    pub fn into_parts(self) -> (READ, DEC)
-    where
-        READ: Sized,
-    {
-        (self.source, self.decoder)
-    }
-
-    /// Destructures this object into the inner [FrameDecoder].
-    pub fn into_frame_decoder(self) -> DEC {
-        self.decoder
     }
 }
 
