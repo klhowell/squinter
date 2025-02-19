@@ -49,14 +49,7 @@ impl<R: Seek> Seek for BlockReader<R> {
 
 /// Reader for uncompressed file data from a series of compressed blocks and possibly a tail-end.
 ///
-/// This reader presents a single contiguous stream to the caller. Internally, it cannot seek to
-/// specific location within compressed blocks. Rather, it knows the starting location and size of
-/// each compressed block and how much total uncompressed data that block contains. To seek into
-/// a block, the reader must seek the base reader to the beginning of the compressed block, and then
-/// use the decompressor to advance to the desired location within the block.
-/// 
-/// The stream position can be calculated from file position of the current block + the amount
-/// already read from that block.
+/// This reader presents a single contiguous stream to the caller. 
 pub struct FileDataReader<R: Read + Seek> {
     inner: ReaderMux<R>,
     pos: u64,
