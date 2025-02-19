@@ -23,7 +23,7 @@ maliciously constructed SquashFS filesystems *will* result in bad data and/or cr
 ## Usage
 Add the following to your `Cargo.toml`:
 ```toml
-squinter = "0.2.0"
+squinter = "0.3.0"
 ```
 
 ```rust
@@ -35,7 +35,7 @@ fn print_file_from_squashfs() -> io::Result<()>{
 
     // List the contents of a directory
     for d in sqfs.read_dir("/etc")? {
-        println!("{}", d.file_name())
+        println!("{}", d.file_name());
     }
 
     // Open a file to read its contents
@@ -65,21 +65,27 @@ implementations. Currently, the three most popular are supported:
 
 ## Performance
 Squinter is designed to be a thin accessor for SquashFS content and seeks to minimize any extra
-processing, read-ahead, or other pro-active optimization of what the user may want to do next. The
-only non-passthrough functionality is a cache of previously decompressed metadata. As a result,
-squinter should perform well on the basis of overhead, but perhaps less well for defined
-tasks like full filesystem extraction. While the code has been written not to be wasteful, little
-attention has been paid to maximizing performance.
+processing, read-ahead, or other pro-active optimization of what the user may want to do next.
+Because decompression time dominates most activities, Squinter maintains caches of:
+* Previously read metadata blocks
+* Previously read file data fragment blocks
+* Currently open file data blocks
+
+When tail-end or fragment packing is in use, the fragment cache improves full-filesystem dump
+performance by >10x. The metadata cache provides similar value for directory surfing. These
+caches are not currently size-limited or otherwise cleaned, and so they will grow to include all
+metadata and fragment blocks over the course of a full-filesystem read. Data blocks that are
+dedicated to a single file are not cached once the file is closed.
 
 Limited performance benches currently consist of surfing the directory tree of a reference SquashFS
 image. When purely reading dir entries, squinter comes in more than 10x faster that squashfs-ng.
-However, when file contents are also read, squinter is about 3x slower than squashfs-ng.
+When file contents are also read, performance is comparable, depending on the compression algorithm.
 
-Compression algorithm implementations also clearly contribute to the overall performance of
+Compression algorithm implementations clearly contribute to the overall performance of
 Squinter. For example, experiments with turning on the 'zlib-ng' feature in flate2 yielded up to
-40% data read-speed improvements. However, squashfs-ng is an excellent library for users who desire
-to link a C library. Squinter will instead continue to use pure Rust compressor implementations (at
-least by default) for the time being.
+40% data read-speed improvements. However, squashfs-ng is already a proven, robust, and performant
+library for users who can accommodate a C library. Squinter will focus on pure Rust compressor
+implementations (at least by default) for the time being.
 
 For the below results, the reference SquashFS image was extracted from
 openwrt-23.05.5-layerscape-armv8_64b-fsl_ls1012a-rdb-squashfs-firmware.bin
@@ -88,15 +94,15 @@ and then recompressed from xz to each of the tested compression algorithms with 
 
 | Benchmark                                 | Squashfs-ng | Squinter | Difference |
 |-------------------------------------------|-------------|----------|------------|
-| **gzip**: Open & read root directory      | 60us        | 46us     | -23%       |
-| **xz**: Open & read root directory        | 280us       | 260us    | -7%        |
-| **zstd**: Open & read root directory      | 46us        | 76us     | +65%       |
-| **gzip**: Open & read full directory tree | 11ms        | 790us    | -93%       |
-| **xz**: Open & read full directory tree   | 76ms        | 2.3ms    | -97%       |
-| **zstd**: Open & read full directory tree | 6.6ms       | 970us    | -85%       |
-| **gzip**: Open & read all file contents   | 77ms        | 210ms    | +173%      |
-| **xz**: Open & read all file contents     | 360ms       | 2.40s    | +567%      |
-| **zstd**: Open & read all file contents   | 29ms        | 560ms    | +1831%     |
+| **gzip**: Open & read root directory      | 160us       | 40us     | -75%       |
+| **xz**: Open & read root directory        | 290us       | 250us    | -14%       |
+| **zstd**: Open & read root directory      | 46us        | 56us     | +22%       |
+| **gzip**: Open & read full directory tree | 11ms        | 810us    | -93%       |
+| **xz**: Open & read full directory tree   | 75ms        | 2.3ms    | -97%       |
+| **zstd**: Open & read full directory tree | 6.6ms       | 940us    | -86%       |
+| **gzip**: Open & read all file contents   | 63ms        | 48ms     | -24%       |
+| **xz**: Open & read all file contents     | 360ms       | 360ms    | +0%        |
+| **zstd**: Open & read all file contents   | 29ms        | 100ms    | +240%      |
 
 ## Credits
 Squinter was written by Kyle Howell, and is entirely based on the on-disk specification documented
