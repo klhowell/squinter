@@ -10,5 +10,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
-clap = { version = "3.2", features = ["derive"] }
+anyhow = "1.0"
+clap = { version = "4.5", features = ["derive"] }
 squinter = { path = "../squinter", version = "0.3.0" }
+termion = "4.0"
