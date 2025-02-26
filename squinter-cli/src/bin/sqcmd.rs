@@ -59,6 +59,8 @@ fn cmd_cat<R: Read+Seek>(sqfs: &mut SquashFS<R>, _cli: &Cli, args: &CatArgs) -> 
 
 fn cmd_ls<R: Read+Seek>(sqfs: &mut SquashFS<R>, _cli: &Cli, args: &LsArgs) -> anyhow::Result<()> {
     let mut first = true;
+    let single_path = args.files.len() == 1;
+
     // First, print non-directories that directly appeared as arguments
     let mut files = Vec::new();
     for file_arg in &args.files {
@@ -77,7 +79,8 @@ fn cmd_ls<R: Read+Seek>(sqfs: &mut SquashFS<R>, _cli: &Cli, args: &LsArgs) -> an
         display_files(files)?;
         first = false;
     }
-    // Next, print the contents of each directory argument, preceded by "<NAME>:""
+    // Next, print the contents of each directory argument, preceded by "<NAME>:"
+    // If only a single path argument is supplied, do not precede with the "<NAME>:" header
     for file_arg in &args.files {
         match sqfs.inode_from_path(&file_arg) {
             Ok(inode) => {
@@ -86,7 +89,9 @@ fn cmd_ls<R: Read+Seek>(sqfs: &mut SquashFS<R>, _cli: &Cli, args: &LsArgs) -> an
                         .map(|de| de.file_name())
                         .collect();
                     if !first { println!(""); }
-                    println!("{}:", file_arg.to_str().unwrap());
+                    if !single_path {
+                        println!("{}:", file_arg.to_str().unwrap());
+                    }
                     display_files(files)?;
                     first = false;
                 }
@@ -118,7 +123,7 @@ fn display_files(files: Vec<String>) -> anyhow::Result<()> {
 
         let mut columns = max_columns as usize;
         let mut col_widths: Vec<usize> = Vec::new();
-        let mut files_per_column = 0; 
+        let mut files_per_column = 0;
         while columns >= min_columns {
             files_per_column = usize::div_ceil(lengths.len(), columns);
             // Figure out the width of each column
