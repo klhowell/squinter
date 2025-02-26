@@ -3,7 +3,8 @@ use std::path::PathBuf;
 
 use anyhow::{self, Context};
 use clap::{Args, Parser, Subcommand};
-use squinter::squashfs::SquashFS;
+use squinter::squashfs::{Inode, SquashFS};
+use squinter::squashfs::metadata::InodeExtendedInfo;
 use termion;
 
 #[derive(Parser, Debug)]
@@ -31,6 +32,8 @@ struct CatArgs {
 
 #[derive(Args, Debug)]
 struct LsArgs {
+    #[arg(short)]
+    long: bool,
     files: Vec<PathBuf>,
 }
 
@@ -67,7 +70,7 @@ fn cmd_ls<R: Read+Seek>(sqfs: &mut SquashFS<R>, _cli: &Cli, args: &LsArgs) -> an
         match sqfs.inode_from_path(&file_arg) {
             Ok(inode) => {
                 if !inode.is_dir() {
-                    files.push(file_arg.to_str().unwrap().to_string());
+                    files.push((file_arg.to_str().unwrap().to_string(), inode));
                 }
             },
             Err(e) => {
@@ -76,7 +79,11 @@ fn cmd_ls<R: Read+Seek>(sqfs: &mut SquashFS<R>, _cli: &Cli, args: &LsArgs) -> an
         }
     }
     if files.len() > 0 {
-        display_files(files)?;
+        if args.long {
+            display_files_long(files)?;
+        } else {
+            display_files(files)?;
+        }
         first = false;
     }
     // Next, print the contents of each directory argument, preceded by "<NAME>:"
@@ -85,14 +92,18 @@ fn cmd_ls<R: Read+Seek>(sqfs: &mut SquashFS<R>, _cli: &Cli, args: &LsArgs) -> an
         match sqfs.inode_from_path(&file_arg) {
             Ok(inode) => {
                 if inode.is_dir() {
-                    let files: Vec<String> = sqfs.read_dir(&file_arg)?
-                        .map(|de| de.file_name())
+                    let files: Vec<(String, Inode)> = sqfs.read_dir(&file_arg)?
+                        .map(|de| (de.file_name(), sqfs.inode_from_entryref(de.inode_ref()).unwrap()))
                         .collect();
                     if !first { println!(""); }
                     if !single_path {
                         println!("{}:", file_arg.to_str().unwrap());
                     }
-                    display_files(files)?;
+                    if args.long {
+                        display_files_long(files)?;
+                    } else {
+                        display_files(files)?;
+                    }
                     first = false;
                 }
             },
@@ -104,12 +115,11 @@ fn cmd_ls<R: Read+Seek>(sqfs: &mut SquashFS<R>, _cli: &Cli, args: &LsArgs) -> an
     Ok(())
 }
 
-fn display_files(files: Vec<String>) -> anyhow::Result<()> {
+fn display_files(files: Vec<(String, Inode)>) -> anyhow::Result<()> {
     if files.is_empty() {
         return Ok(());
     }
 
-    //if termion::is_tty(&File::create("/dev/stdout")?) {
     if termion::is_tty(&std::io::stdout()) {
         let (term_width, _) = termion::terminal_size()
             .context("Failed to read terminal size")?;
@@ -117,7 +127,7 @@ fn display_files(files: Vec<String>) -> anyhow::Result<()> {
 
         // The correct number of columns is somewhere between width/max_col_length and
         // width/min_col_length
-        let lengths: Vec<usize> = files.iter().map(|s| s.len()).collect();
+        let lengths: Vec<usize> = files.iter().map(|(s,_)| s.len()).collect();
         let min_columns = term_width / (*lengths.iter().max().unwrap() + 2);
         let max_columns = term_width / (*lengths.iter().min().unwrap() + 2);
 
@@ -142,7 +152,7 @@ fn display_files(files: Vec<String>) -> anyhow::Result<()> {
         }
 
         for row in 0..files_per_column {
-            for (n, filename) in files.iter().skip((row) as usize).step_by(files_per_column as usize).enumerate() {
+            for (n, (filename,_)) in files.iter().skip((row) as usize).step_by(files_per_column as usize).enumerate() {
                 if n != 0 {
                     print!("   ");
                 }
@@ -151,9 +161,55 @@ fn display_files(files: Vec<String>) -> anyhow::Result<()> {
             println!();
         }
     } else {
-        for filename in files {
+        for (filename, _) in files {
             println!("{}", filename);
         }
     }
     Ok(())
+}
+
+fn display_files_long(files: Vec<(String, Inode)>) -> anyhow::Result<()> {
+    if files.is_empty() {
+        return Ok(());
+    }
+
+    for (filename, inode) in files {
+        let link_postfix = match &inode.extended_info {
+            InodeExtendedInfo::BasicSymlink(i) => {
+                let mut s = String::from(" -> ");
+                s.push_str(i.target_path.to_str()?);
+                s
+            }
+            _ => { String::new() }
+        };
+        println!("{} {}{}", inode_mode_string(inode.mode()), filename, link_postfix);
+    }
+    Ok(())
+}
+
+fn inode_mode_string(mode: u16) -> String {
+    let mut s = String::with_capacity(10);
+    let mode_type = (mode & 0o170000) >> 12;
+    let ch = match mode_type {
+        1 => 'p',  // Pipe
+        2 => 'c',  // char-dev
+        4 => 'd',  // dir
+        6 => 'b',  // block-dev
+        8 => '-',  // file
+        10 => 'l', // symlink
+        12 => 's', // socket
+        _ => '?',  // unknown
+    };
+
+    s.push(ch);
+    s.push(if mode & 0o400 != 0 { 'r' } else { '-' });
+    s.push(if mode & 0o200 != 0 { 'w' } else { '-' });
+    s.push(if mode & 0o100 != 0 { 'x' } else { '-' });
+    s.push(if mode & 0o040 != 0 { 'r' } else { '-' });
+    s.push(if mode & 0o020 != 0 { 'w' } else { '-' });
+    s.push(if mode & 0o010 != 0 { 'x' } else { '-' });
+    s.push(if mode & 0o004 != 0 { 'r' } else { '-' });
+    s.push(if mode & 0o002 != 0 { 'w' } else { '-' });
+    s.push(if mode & 0o001 != 0 { 'x' } else { '-' });
+    s
 }
