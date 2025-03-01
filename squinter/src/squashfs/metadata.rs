@@ -224,7 +224,7 @@ impl<R: Read + Seek> Seek for MetadataReader<R> {
 }
 
 /// An opaque reference value that can be used to retrieve a specific [`Inode`] using [`inode_from_entryref`].
-/// 
+///
 /// [`Inode`]: struct.Inode.html
 /// [`inode_from_entryref`]: ../squashfs/struct.SquashFS.html#method.inode_from_entryref
 #[derive(Clone, Copy)]
@@ -389,7 +389,7 @@ pub(crate) struct FragmentLookupTable {
 }
 
 impl FragmentLookupTable {
-    pub fn read<R>(r: &mut R, sb: &Superblock) -> io::Result<Self> 
+    pub fn read<R>(r: &mut R, sb: &Superblock) -> io::Result<Self>
     where R: Read + Seek
     {
         Ok(Self {
@@ -404,7 +404,7 @@ pub(crate) struct IdLookupTable {
 }
 
 impl IdLookupTable {
-    pub fn read<R>(r: &mut R, sb: &Superblock) -> io::Result<Self> 
+    pub fn read<R>(r: &mut R, sb: &Superblock) -> io::Result<Self>
     where R: Read + Seek
     {
         Ok(Self {
@@ -421,7 +421,7 @@ struct ExportLookupTable {
 
 impl ExportLookupTable {
     #[allow(dead_code)]
-    fn read<R>(r: &mut R, sb: &Superblock) -> io::Result<Option<Self>> 
+    fn read<R>(r: &mut R, sb: &Superblock) -> io::Result<Option<Self>>
     where R: Read + Seek
     {
         if sb.export_table == u64::MAX {
@@ -443,7 +443,7 @@ struct ExtendedAttributeLookupTable {
 
 impl ExtendedAttributeLookupTable {
     #[allow(dead_code)]
-    fn read<R>(r: &mut R, sb: &Superblock) -> io::Result<Option<Self>> 
+    fn read<R>(r: &mut R, sb: &Superblock) -> io::Result<Option<Self>>
     where R: Read + Seek
     {
         if sb.xattr_table == u64::MAX {
@@ -614,7 +614,7 @@ impl Inode {
             InodeType::BasicSymlink => {
                 let link_count = r.read_u32::<LittleEndian>()?;
                 let target_size = r.read_u32::<LittleEndian>()?;
-               
+
                 let mut path_buf = Vec::with_capacity(usize::try_from(target_size).unwrap());
                 let read_size = r.take(target_size.into()).read_to_end(&mut path_buf)?;
                 if read_size != target_size.try_into().unwrap() {
@@ -643,7 +643,7 @@ impl Inode {
         };
 
         Ok(Self {
-            inode_type, permissions, uid_index, gid_index, mtime, inode_number, extended_info 
+            inode_type, permissions, uid_index, gid_index, mtime, inode_number, extended_info
         })
     }
 
