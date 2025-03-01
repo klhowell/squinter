@@ -673,6 +673,11 @@ impl Inode {
         matches!(self.inode_type, InodeType::ExtDir)
     }
 
+    pub fn is_symlink(&self) -> bool {
+        matches!(self.inode_type, InodeType::BasicSymlink) ||
+        matches!(self.inode_type, InodeType::ExtSymlink)
+    }
+
     pub fn inode_number(&self) -> u32 {
         self.inode_number
     }
