@@ -173,7 +173,22 @@ fn display_files_long(files: Vec<(String, Inode)>) -> anyhow::Result<()> {
         return Ok(());
     }
 
+    let total = files.len();
+    // We need to know the max size ahead of time so that we can leave enough space for it
+    let max_size = files.iter()
+        .filter_map(|(_,i)| i.file_size())
+        .max()
+        .unwrap_or(0);
+    let size_len = format!("{max_size}").len();
+
+    println!("total {total}");
     for (filename, inode) in files {
+        let mode_str = inode_mode_string(inode.mode());
+        let size_str = if let Some(x) = inode.file_size() {
+                    x.to_string()
+                } else {
+                    String::from("-")
+                };
         let link_postfix = match &inode.extended_info {
             InodeExtendedInfo::BasicSymlink(i) => {
                 let mut s = String::from(" -> ");
@@ -182,11 +197,12 @@ fn display_files_long(files: Vec<(String, Inode)>) -> anyhow::Result<()> {
             }
             _ => { String::new() }
         };
-        println!("{} {}{}", inode_mode_string(inode.mode()), filename, link_postfix);
+        println!("{mode_str}  {size_str:>size_len$}  {filename}{link_postfix}");
     }
     Ok(())
 }
 
+/// Parse the file mode to create the standard '-rwxrwxrwx' mode string
 fn inode_mode_string(mode: u16) -> String {
     let mut s = String::with_capacity(10);
     let mode_type = (mode & 0o170000) >> 12;

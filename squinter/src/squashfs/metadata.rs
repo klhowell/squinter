@@ -715,6 +715,15 @@ impl Inode {
         .ok_or(io::Error::from(io::ErrorKind::NotFound))
     }
 
+    pub fn file_size(&self) -> Option<u32> {
+        match &self.extended_info {
+            InodeExtendedInfo::BasicFile(i) => Some(i.file_size),
+            InodeExtendedInfo::BasicDir(i) => Some(i.file_size as u32),
+            InodeExtendedInfo::ExtDir(i) => Some(i.file_size),
+            _ => None,
+        }
+    }
+
     pub fn mtime(&self) -> u32 {
         self.mtime
     }
