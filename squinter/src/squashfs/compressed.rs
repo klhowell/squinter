@@ -9,7 +9,9 @@ use flate2::read::ZlibDecoder;
 #[cfg(feature = "lzma-rs")]
 use lzma_rs::xz_decompress;
 
+#[cfg(feature = "ruzstd")]
 use ruzstd::decoding::errors::FrameDecoderError;
+#[cfg(feature = "ruzstd")]
 use ruzstd::decoding::BlockDecodingStrategy;
 #[cfg(feature = "ruzstd")]
 use ruzstd::decoding::FrameDecoder;
