@@ -50,7 +50,10 @@ fn main() -> anyhow::Result<()> {
 
 fn cmd_cat<R: Read+Seek>(sqfs: &mut SquashFS<R>, _cli: &Cli, args: &CatArgs) -> anyhow::Result<()> {
     for file_arg in &args.files {
-        let inode = sqfs.inode_from_path(&file_arg)
+        // The requested path may include symlinks, so we can't just look it up as-is. We need to
+        // resolve the path first.
+        let resolved = squashfs::path::canonicalize(sqfs, file_arg, "/")?;
+        let inode = sqfs.inode_from_path(&resolved)
             .context("Cannot open inode")?;
         if !inode.is_dir() {
             let mut reader = sqfs.open_file_inode(&inode)?;
