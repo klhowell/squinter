@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use anyhow::{self, Context};
 use clap::{Args, Parser, Subcommand};
-use squinter::squashfs::{Inode, SquashFS};
+use squinter::squashfs::{self, Inode, SquashFS};
 use squinter::squashfs::metadata::InodeExtendedInfo;
 use termion;
 
@@ -67,7 +67,10 @@ fn cmd_ls<R: Read+Seek>(sqfs: &mut SquashFS<R>, _cli: &Cli, args: &LsArgs) -> an
     // First, print non-directories that directly appeared as arguments
     let mut files = Vec::new();
     for file_arg in &args.files {
-        match sqfs.inode_from_path(&file_arg) {
+        // The requested path may include symlinks, so we can't just look it up as-is. We need to
+        // resolve the path first.
+        let resolved = squashfs::path::canonicalize(sqfs, file_arg, "/")?;
+        match sqfs.inode_from_path(&resolved) {
             Ok(inode) => {
                 if !inode.is_dir() {
                     files.push((file_arg.to_str().unwrap().to_string(), inode));
@@ -89,14 +92,18 @@ fn cmd_ls<R: Read+Seek>(sqfs: &mut SquashFS<R>, _cli: &Cli, args: &LsArgs) -> an
     // Next, print the contents of each directory argument, preceded by "<NAME>:"
     // If only a single path argument is supplied, do not precede with the "<NAME>:" header
     for file_arg in &args.files {
-        match sqfs.inode_from_path(&file_arg) {
+        // The requested path may include symlinks, so we can't just look it up as-is. We need to
+        // resolve the path first.
+        let resolved = squashfs::path::canonicalize(sqfs, file_arg, "/")?;
+        match sqfs.inode_from_path(&resolved) {
             Ok(inode) => {
                 if inode.is_dir() {
-                    let files: Vec<(String, Inode)> = sqfs.read_dir(&file_arg)?
+                    let files: Vec<(String, Inode)> = sqfs.read_dir_inode(&inode)?
                         .map(|de| (de.file_name(), sqfs.inode_from_entryref(de.inode_ref()).unwrap()))
                         .collect();
                     if !first { println!(""); }
                     if !single_path {
+                        // Note: the header is what the user entered, not the resolved version
                         println!("{}:", file_arg.to_str().unwrap());
                     }
                     if args.long {
