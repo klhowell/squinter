@@ -31,7 +31,7 @@ pub enum CompressedBlockReader<R>
     Zstd(Take<ZstdDecoder<Take<R>, FrameDecoder>>),
 }
 
-impl<R: Read> Debug for CompressedBlockReader<R> {
+impl<R> Debug for CompressedBlockReader<R> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::None => write!(f, "None"),
@@ -129,6 +129,7 @@ impl<R: Read> Read for CompressedBlockReader<R> {
 /// to propagate all over squinter's structs. Removing the constraint allows the Read constraint
 /// to be limited to impls.
 #[cfg(feature = "ruzstd")]
+#[derive(Debug)]
 pub struct ZstdDecoder<READ, DEC: BorrowMut<FrameDecoder>> {
     decoder: DEC,
     source: READ,

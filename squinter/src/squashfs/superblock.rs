@@ -63,6 +63,7 @@ pub enum Compressor {
     Unknown = 0xFFFF,
 }
 
+#[derive(Debug)]
 #[allow(dead_code)]
 pub struct GzipOptions {
     pub compression_level: u32,

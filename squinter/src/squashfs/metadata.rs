@@ -154,6 +154,7 @@ impl<R: Read + Seek> Seek for CachingMetadataReader<R> {
     }
 }
 
+#[derive(Debug)]
 pub(crate) struct MetadataReader<R>
 where
     R: Read,

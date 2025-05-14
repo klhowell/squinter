@@ -7,6 +7,7 @@ use super::readermux::{ReaderClient, ReaderMux};
 use super::superblock::{Superblock, Compressor};
 use super::compressed::CompressedBlockReader;
 
+#[derive(Debug)]
 #[allow(dead_code)]
 struct FileBlockInfo<R> {
     disk_offset: u64,
@@ -18,12 +19,14 @@ struct FileBlockInfo<R> {
 }
 
 // TODO: TailEnd support
+#[derive(Debug)]
 #[allow(dead_code)]
 struct TailEnd {
     fragment: FragmentEntry,
     offset: u32,
 }
 
+#[derive(Debug)]
 enum BlockReader<R> {
     Block(CachingReader<CompressedBlockReader<ReaderClient<R>>>),
     Fragment(FragmentReader<ReaderClient<CachingReader<CompressedBlockReader<ReaderClient<R>>>>>),
@@ -50,6 +53,7 @@ impl<R: Seek> Seek for BlockReader<R> {
 /// Reader for uncompressed file data from a series of compressed blocks and possibly a tail-end.
 ///
 /// This reader presents a single contiguous stream to the caller. 
+#[derive(Debug)]
 pub struct FileDataReader<R: Read + Seek> {
     inner: ReaderMux<R>,
     pos: u64,
