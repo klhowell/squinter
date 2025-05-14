@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- path module with canonicalize function for paths with symlinks
+
+### Fixed
+
+- Debug was not implemented for all structs/enums
+- sqcmd could not handle paths containing symlinks
+
+### Changed
+
+- Renamed 'unsquashfs' utility to 'unsqfs' to prevent name conflict with standard unsquashfs utility
+
 ## [0.3.1] - 2025-03-04
 
 ### Fixed
