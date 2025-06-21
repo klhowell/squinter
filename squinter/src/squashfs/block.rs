@@ -1,7 +1,11 @@
+use std::cell::RefCell;
 use std::cmp;
 use std::collections::HashMap;
 use std::io::{self, Cursor, Read, Seek, SeekFrom};
 
+use byteorder::{LittleEndian, ReadBytesExt};
+
+use super::metadata::EntryReference;
 use super::readermux::{ReaderClient, ReaderMux};
 use super::compressed::CompressedBlockReader;
 use super::superblock::Compressor;
@@ -159,6 +163,192 @@ impl<R:Seek> Seek for FragmentReader<R> {
                 Ok(self.pos)
             },
         }
+    }
+}
+
+/// A store of metadata blocks. Users can request specific data by block address.
+/// The cache will provide a reader that is backed by the memory buffer and will read additional
+/// data from the inner reader as needed to fulfill reads. Provided readers will automatically
+/// advance to the next metadata block as needed.
+#[derive(Debug)]
+pub struct MetadataBlockCache<R: Read+Seek> {
+    inner: RefCell<ReaderMux<R>>,
+    compressor: Compressor,
+    block_readers: RefCell<HashMap<u64, MetadataBlockReaderMux<ReaderClient<R>>>>,
+}
+
+impl<R:Read+Seek> MetadataBlockCache<R> {
+    pub fn new(inner: R, compressor: Compressor) -> Self {
+        Self {
+            inner: RefCell::new(ReaderMux::new(inner)),
+            compressor,
+            block_readers: RefCell::new(HashMap::new()),
+        }
+    }
+
+    // Create and return a new MetadataBlockReader over the metadata block at the specified
+    // address, creating a new caching ReaderMux to back it if necessary. This Reader only spans a
+    // single block and will not automatically roll into the next block.
+    pub fn get_block_reader(&self, block_addr: u64)
+        -> io::Result<MetadataBlockReader<ReaderClient<R>>>
+    {
+        let mut block_readers = self.block_readers.borrow_mut();
+        let block_reader_mux = match block_readers.get_mut(&block_addr) {
+            Some(r) => r,
+            None => {
+                //let r = self.create_block_reader(block_addr)?;
+                let r = MetadataBlockReaderMux::new(
+                    self.inner.borrow_mut().client(),
+                    block_addr,
+                    self.compressor,
+                )?;
+                block_readers.insert(block_addr, r);
+                block_readers.get_mut(&block_addr).unwrap()
+            },
+        };
+        Ok(block_reader_mux.client())
+    }
+}
+
+#[derive(Debug)]
+struct MetadataBlockReaderMux<R:Read+Seek> {
+    inner: ReaderMux<CachingReader<CompressedBlockReader<R>>>,
+    block_addr: u64,
+    block_size: u16,
+}
+
+impl<R:Read+Seek> MetadataBlockReaderMux<R> {
+    fn new(mut inner: R, block_addr: u64, compressor: Compressor) -> io::Result<Self> {
+        // SquashFS Metadata block size is fixed by the specification
+        const METADATA_UNCOMPRESSED_BLOCK_SIZE: u16 = 8192;
+
+        inner.seek(SeekFrom::Start(block_addr))?;
+
+        // The size of metadata blocks is stored in a 16-bit header
+        let header: u16 = inner.read_u16::<LittleEndian>()?;
+        let block_size: u16 = header & 0x7FFF;
+        let compressed: bool = header & 0x8000 == 0;
+        
+        println!("Opening new block @{} -- size:{}", block_addr, block_size);
+
+        if block_size > METADATA_UNCOMPRESSED_BLOCK_SIZE {
+            eprintln!("Metadata block size too big -- {}", block_size);
+            return Err(io::Error::from(io::ErrorKind::InvalidData));
+        }
+        
+        let compressor = if compressed {
+            compressor
+        } else {
+            Compressor::None
+        };
+
+        let compressed_reader = CompressedBlockReader::new(inner, compressor, block_size.into(), METADATA_UNCOMPRESSED_BLOCK_SIZE.into())?;
+        let caching_reader = CachingReader::new_with_capacity(compressed_reader, METADATA_UNCOMPRESSED_BLOCK_SIZE.into());
+        let reader_mux = ReaderMux::new(caching_reader);
+        Ok(
+            Self {
+                inner: reader_mux,
+                block_addr,
+                block_size,
+            }
+        )
+    }
+    
+    fn client(&mut self) -> MetadataBlockReader<R> {
+        let reader_client = self.inner.client();
+        MetadataBlockReader::new(reader_client, self.block_addr, self.block_size)
+    }
+}
+
+#[derive(Debug)]
+pub struct MetadataBlockReader<R:Read+Seek> {
+    inner: ReaderClient<CachingReader<CompressedBlockReader<R>>>,
+    block_addr: u64,
+    block_size: u16,
+}
+
+impl<R:Read+Seek> MetadataBlockReader<R> {
+    pub fn new(inner: ReaderClient<CachingReader<CompressedBlockReader<R>>>, block_addr: u64, block_size: u16) -> Self {
+        Self {
+            inner,
+            block_addr,
+            block_size,
+        }
+    }
+    
+    pub fn block_addr(&self) -> u64 {
+        self.block_addr
+    }
+    
+    pub fn block_size(&self) -> u16 {
+        self.block_size
+    }
+    
+    // Don't forget about the 2-byte header
+    pub fn next_block_addr(&self) -> u64 {
+        self.block_addr + 2 + self.block_size as u64
+    }
+}
+
+impl<R:Read+Seek> Read for MetadataBlockReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        self.inner.read(buf)
+    }
+}
+
+impl<R:Read+Seek> Seek for MetadataBlockReader<R> {
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        self.inner.seek(pos)
+    }
+}
+
+pub struct MetadataReader<'a, R:Read+Seek> {
+    cache: &'a MetadataBlockCache<R>,
+    inner: MetadataBlockReader<ReaderClient<R>>,
+    end_addr: Option<u64>,
+}
+
+impl<'a, R:Read+Seek> MetadataReader<'a, R> {
+    pub fn new(cache: &'a MetadataBlockCache<R>, addr: EntryReference, end_addr: Option<u64>) -> io::Result<Self> {
+        let mut inner = cache.get_block_reader(addr.location())?;
+        inner.seek(SeekFrom::Current(addr.offset().into()))?;
+        Ok(Self {
+            cache,
+            inner,
+            end_addr,
+        })
+    }
+    
+    pub fn seek_ref(&mut self, addr: EntryReference) -> io::Result<()> {
+        if addr.location() != self.inner.block_addr() {
+            self.inner = self.cache.get_block_reader(addr.location())?;
+        }
+        self.inner.seek(SeekFrom::Start(addr.offset().into()))?;
+        Ok(())
+    }
+}
+
+impl<'a, R:Read+Seek> Read for MetadataReader<'a, R> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let size = self.inner.read(buf)?;
+        if size == 0 && buf.len() != 0 {
+            // This must be the end of the block. Potentially start a new one.
+            let done = self.end_addr.is_some_and(|x| x <= self.inner.next_block_addr());
+            if done {
+                Ok(0)
+            } else {
+                self.inner = self.cache.get_block_reader(self.inner.next_block_addr())?;
+                self.inner.read(buf)
+            }
+        } else {
+            Ok(size)
+        }
+    }
+}
+
+impl<'a, R:Read+Seek> Seek for MetadataReader<'a, R> {
+    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
+        self.inner.seek(pos)
     }
 }
 
