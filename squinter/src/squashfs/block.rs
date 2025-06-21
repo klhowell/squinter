@@ -95,7 +95,7 @@ impl<R:Read+Seek> FragmentBlockCache<R> {
         let mut client_reader = self.inner.client();
         client_reader.seek(SeekFrom::Start(block_addr))?;
         let compressed_reader = CompressedBlockReader::new(client_reader, self.compressor, block_size, uncompressed_size)?;
-        let caching_reader = CachingReader::new_with_capacity(compressed_reader, block_size as usize);
+        let caching_reader = CachingReader::new_with_capacity(compressed_reader, uncompressed_size as usize);
         Ok(ReaderMux::new(caching_reader))
     }
 }
