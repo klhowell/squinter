@@ -8,7 +8,7 @@ use std::boxed::Box;
 
 use super::filedata::FileDataReader;
 use super::metadata::{self, CachingMetadataReader};
-use super::block::FragmentBlockCache;
+use super::block::{FragmentBlockCache, MetadataBlockCache, MetadataReader};
 use super::readermux::{ReaderMux, ReaderClient};
 use super::superblock::Superblock;
 
@@ -19,6 +19,7 @@ pub struct SquashFS<R:Read+Seek> {
     reader_mux: Box<ReaderMux<R>>,
     md_reader: CachingMetadataReader<ReaderClient<R>>,
     frag_cache: FragmentBlockCache<ReaderClient<R>>,
+    metadata_cache: MetadataBlockCache<ReaderClient<R>>,
     sb: Superblock,
     pub(crate) id_table: metadata::IdLookupTable,
 }
@@ -42,7 +43,9 @@ impl<R: Read + Seek> SquashFS<R> {
         let mut reader_mux = Box::new(ReaderMux::new(r));
         let md_reader = CachingMetadataReader::new(reader_mux.client(), sb.compressor);
         let frag_cache = FragmentBlockCache::new(reader_mux.client(), sb.compressor);
-        Ok(SquashFS { reader_mux, md_reader, frag_cache, sb, id_table })
+        let metadata_cache = MetadataBlockCache::new(reader_mux.client(), sb.compressor);
+        Ok(SquashFS { reader_mux, md_reader, frag_cache, metadata_cache, sb, id_table })
+    }
     }
 
     /// Retrieve an iterator that walks the dirents within a directory specified by the given
