@@ -46,6 +46,12 @@ impl<R> Debug for CompressedBlockReader<R> {
     }
 }
 
+/// Abstraction for a Read instance that sources data from a block of compressed data. The block's
+/// compression is specified when the CompressedBlockReader is created, and it handles setting up
+/// the underlying block decompressor and then passing future read() calls through to it. Some
+/// compressors do not allow progressive reads. For those, the CompressedBlockReader decompresses
+/// and stores the entire block at creation time and then services future read() calls from that
+/// stored data.
 #[allow(dead_code)]
 impl<R: Read> CompressedBlockReader<R> {
     pub fn new(r: R, comp: Compressor, compressed_size: u64, uncompressed_size: u64) -> io::Result<Self> {
