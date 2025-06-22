@@ -93,6 +93,15 @@ impl<R:Read+Seek> MetadataProvider<R> {
         MetadataProvider { cache, inode_addrs, dir_addrs, frag_addrs, export_addrs, id_addrs, xattr_addrs }
     }
     
+    pub fn archive_reader(&self, entry_ref: EntryReference) -> io::Result<MetadataReader<R>> {
+        MetadataReader::new(
+            &self.cache,
+            0,
+            None,
+            entry_ref,
+        )
+    }
+
     pub fn inode_reader(&self, entry_ref: EntryReference) -> io::Result<MetadataReader<R>> {
         MetadataReader::new(
             &self.cache,
@@ -254,6 +263,23 @@ impl<I: FromBytes> LookupTable<I> {
         }
         Ok(me)
     }
+    
+    fn read_one<R,P>(r: &mut R, mp: &MetadataProvider<P>, table_offset: u64, index: usize) -> io::Result<I>
+    where R: Read + Seek,
+          P: Read + Seek,
+    {
+        let meta_index = index * I::BYTE_SIZE as usize / METADATA_BLOCK_SIZE as usize;
+        let block_offset: u16 = ((index * I::BYTE_SIZE as usize) % METADATA_BLOCK_SIZE as usize).try_into().unwrap();
+
+        // Read the metadata block location
+        r.seek(SeekFrom::Start(table_offset + (meta_index as u64 * 8)))?;
+        let block_addr = r.read_u64::<LittleEndian>()?;
+
+        let mut reader = mp.archive_reader(EntryReference::new(block_addr, block_offset))?;
+        let mut buf = vec![0; I::BYTE_SIZE as usize];
+        reader.read_exact(&mut buf)?;
+        Ok(I::from_bytes(&buf))
+    }
 }
 
 #[derive(Debug)]
@@ -284,6 +310,13 @@ impl FragmentLookupTable {
         Ok(Self {
             lu_table: LookupTable::read(r, sb.frag_table, sb.frag_count as u32, &sb.compressor)?,
         })
+    }
+    
+    pub fn read_one<R,P>(r: &mut R, mp: &MetadataProvider<P>, sb: &Superblock, index: usize) -> io::Result<FragmentEntry>
+    where R: Read + Seek,
+          P: Read + Seek,
+    {
+        LookupTable::read_one(r, mp, sb.frag_table, index)
     }
 }
 

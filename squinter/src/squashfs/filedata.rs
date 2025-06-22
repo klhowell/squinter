@@ -2,7 +2,7 @@ use std::io;
 use std::io::{Read, Seek, SeekFrom};
 
 use super::block::{CachingReader, FragmentBlockCache, FragmentReader};
-use super::metadata::{self, FragmentEntry, Inode, InodeExtendedInfo};
+use super::metadata::{self, FragmentEntry, Inode, InodeExtendedInfo, MetadataProvider};
 use super::readermux::{ReaderClient, ReaderMux};
 use super::superblock::{Superblock, Compressor};
 use super::compressed::CompressedBlockReader;
@@ -63,7 +63,7 @@ pub struct FileDataReader<R: Read + Seek> {
 }
 
 impl<R: Read + Seek> FileDataReader<R> {
-    pub fn from_inode(inner: R, sb: &Superblock, frag_cache: &mut FragmentBlockCache<R>, inode: &Inode) -> io::Result<Option<Self>>
+    pub fn from_inode(inner: R, mp: &MetadataProvider<R>, sb: &Superblock, frag_cache: &mut FragmentBlockCache<R>, inode: &Inode) -> io::Result<Option<Self>>
     {
         let pos = 0;
         let comp = sb.compressor;
@@ -99,8 +99,7 @@ impl<R: Read + Seek> FileDataReader<R> {
                     remaining -= u64::from(data_len);
                 }
                 if i.frag_index != u32::MAX {
-                    let ft = metadata::FragmentLookupTable::read(&mut inner.client(), sb)?;
-                    let f: &FragmentEntry = &ft.lu_table.entries[i.frag_index as usize];
+                    let f = metadata::FragmentLookupTable::read_one(&mut inner.client(), mp, sb, i.frag_index as usize)?;
                     blocks.push( FileBlockInfo {
                         disk_offset: f.start,
                         disk_len: f.size & 0xFFFFFF,
