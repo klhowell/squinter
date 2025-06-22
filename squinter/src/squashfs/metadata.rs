@@ -1,5 +1,4 @@
 use std::cmp::min;
-use std::collections::HashMap;
 use std::fmt::Debug;
 use std::io::{self, Cursor, Read, Seek, SeekFrom};
 use std::ffi::CString;
@@ -10,6 +9,7 @@ use num_enum::{IntoPrimitive, TryFromPrimitive};
 
 use super::block::{MetadataBlockCache, MetadataReader};
 use super::compressed::CompressedBlockReader;
+use super::superblock::{Compressor, Superblock};
 
 //let block_count = (item_count + (METADATA_BLOCK_SIZE / I::BYTE_SIZE) as u32 - 1) / (METADATA_BLOCK_SIZE / I::BYTE_SIZE) as u32;
 
@@ -51,179 +51,6 @@ pub(crate) fn read_metadata_block<R>(r: &mut R, c: &Compressor, buf: &mut [u8]) 
 
     Ok(((size as usize) + 2, total as usize))
 }
-
-// This is a reader that wraps the Reader for a backing-store of compressed metadata blocks,
-// providing a more convenient interface for reading metadata. When the user first reads data from
-// a new metadata block, the entire compressed block is immediately fully read and decompressed. To
-// reduce repeated work, each decompressed block is placed in a cache which bypasses the
-// read/decompress if the block is needed again in the future.
-//
-// Due to the SquashFS format using compressed offsets to specify metadata locations, the Reader
-// position is handled in a non-standard way. Seek operations refer to compressed addresses, and
-// it is expected that seeks will always refer to the beginning of a metadata block -- ie, since the
-// reader has no way of knowing the boundaries of compressed metadata blocks, the user must
-// provide them via the seek() call. seek() cannot currently be used to navigate within a metadata
-// block -- unneeded data must be read and discarded.
-//
-// Once an initial metablock location has been established, the user may continue reading across
-// multiple blocks with the CachingMetadataReader silently decompressing each new block as needed.
-// If a user read is large enough to bridge across a block boundary then the Reader will return a
-// short read up until the end of the current block, and the user must call read a second time to
-// retrieve the next block's data.
-#[derive(Debug)]
-pub(crate) struct CachingMetadataReader<R> {
-    inner: R,                                       // Backing reader on the compressed stream
-    cur_pos: u64,                                   // Virtual seek offset within the *compressed* stream
-    stream_pos: u64,                                // Actual seek position of backing reader
-    comp: Compressor,                               // What compressor to use to decompress compressed blocks
-    block_cache: HashMap<u64, (usize, Vec<u8>)>,    // Map of compressed block offsets to their uncompressed data
-    cur_key: Option<u64>,                           // Key used to obtain currently possessed cache block
-    cur_data: Option<(usize, Vec<u8>)>,             // Currently possessed cache block
-    cur_offset: usize,                              // Read offset within possessed cache block
-}
-
-impl<R:Read + Seek> CachingMetadataReader<R> {
-    pub fn new(mut inner: R, comp: Compressor) -> Self {
-        let stream_pos = inner.stream_position().unwrap();
-        let cur_pos = stream_pos;
-        Self { inner, comp, block_cache: HashMap::new(), cur_key: None, cur_data: None, cur_offset: 0, cur_pos, stream_pos }
-    }
-}
-
-impl<R: Read + Seek> Read for CachingMetadataReader<R> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if self.cur_data.is_none() {
-            let new_key = self.cur_pos;
-            if let Some(d) = self.block_cache.remove(&new_key) {
-                //eprintln!("Using cache ({})", new_key);
-                self.cur_pos += d.0 as u64;
-                self.cur_key = Some(new_key);
-                self.cur_data = Some(d);
-                self.cur_offset = 0;
-            } else {
-                //eprintln!("Using new read ({})", new_key);
-                if self.cur_pos != self.stream_pos {
-                    self.inner.seek(SeekFrom::Start(self.cur_pos))?;
-                    self.stream_pos = self.cur_pos;
-                }
-                let mut buf: [u8;8192] = [0; 8192];
-                let size = read_metadata_block(&mut self.inner, &self.comp, &mut buf)?;
-                self.stream_pos += size.0 as u64;
-                self.cur_pos += size.0 as u64;
-                self.cur_key = Some(new_key);
-                self.cur_data = Some((size.0, buf[..size.1].to_vec()));
-                self.cur_offset = 0;
-            }
-        }
-
-        if let Some(d) = &self.cur_data {
-            let read_size = Read::read(&mut &d.1[self.cur_offset..], buf)?;
-            self.cur_offset += read_size;
-
-            //eprintln!("Read {}: Got {}; new offset {}/{}", buf.len(), read_size, self.cur_offset, d.1.len());
-
-            if self.cur_offset >= d.1.len() {
-                let cache_key = mem::take(&mut self.cur_key).unwrap();
-                let cache_data = mem::take(&mut self.cur_data).unwrap();
-                self.cur_offset = 0;
-                self.block_cache.insert(cache_key, cache_data);
-            }
-
-            Ok(read_size)
-        } else {
-            Err(io::Error::from(io::ErrorKind::NotFound))
-        }
-    }
-}
-
-impl<R: Read + Seek> Seek for CachingMetadataReader<R> {
-    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
-        if self.cur_data.is_some() {
-            // Deposit the current data block in the cache
-            let cache_key = mem::take(&mut self.cur_key).unwrap();
-            let cache_data = mem::take(&mut self.cur_data).unwrap();
-            self.block_cache.insert(cache_key, cache_data);
-        }
-        //eprintln!("Seek: {:?}", pos);
-        self.cur_pos = match pos {
-            SeekFrom::Start(p) => p,
-            SeekFrom::Current(p) => (self.cur_pos as i64 + p) as u64,
-            _ => return Err(io::Error::from(io::ErrorKind::Unsupported))
-        };
-        Ok(self.cur_pos)
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct MetadataReader<R>
-where
-    R: Read,
-{
-    inner: CompressedBlockReader<R>,
-    comp: Compressor,
-}
-
-impl<R: Read + Seek> MetadataReader<R> {
-    #[allow(dead_code)]
-    pub fn new(inner: R, comp: Compressor) -> MetadataReader<R> {
-        MetadataReader { inner: CompressedBlockReader::Base(inner), comp }
-    }
-
-    #[allow(dead_code)]
-    pub fn into_inner(self) -> R {
-        self.inner.into_inner()
-    }
-
-    fn start_block(&mut self) -> io::Result<()> {
-        let inner = CompressedBlockReader::take(&mut self.inner);
-        let inner = inner.into_base();
-
-        if let CompressedBlockReader::Base(mut r) = inner {
-            let header: u16 = r.read_u16::<LittleEndian>()?;
-            let size: u16 = header & 0x7FFF;
-            let compressed: bool = header & 0x8000 == 0;
-            //println!("MetadataReader: Starting block. Compressed = {}; Size = {}", compressed, size);
-
-            self.inner = if !compressed {
-                CompressedBlockReader::Uncompressed(r.take(size.into()))
-            } else {
-                CompressedBlockReader::new(r, self.comp, size.into(), METADATA_BLOCK_SIZE.into())?
-            };
-            Ok(())
-        } else {
-            panic!("start_block: not Base reader");
-        }
-    }
-}
-
-impl<R: Read + Seek> Read for MetadataReader<R> {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        if let CompressedBlockReader::Base(_) = self.inner {
-            self.start_block()?;
-        }
-
-        let mut size = self.inner.read(buf)?;
-        if size == 0 && buf.len() != 0 {
-            // This must be the end of the block. Try to start a new one.
-            self.start_block()?;
-            size = self.inner.read(buf)?;
-        }
-        Ok(size)
-    }
-}
-
-impl<R: Read + Seek> Seek for MetadataReader<R> {
-    fn seek(&mut self, pos: SeekFrom) -> io::Result<u64> {
-        let inner = CompressedBlockReader::take(&mut self.inner);
-        self.inner = inner.into_base();
-        if let CompressedBlockReader::Base(r) = &mut self.inner {
-            r.seek(pos)
-        } else {
-            panic!("seek: not Base reader");
-        }
-    }
-}
-*/
 
 #[derive(Debug)]
 pub struct MetadataProvider<R: Read+Seek> {
