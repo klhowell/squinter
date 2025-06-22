@@ -7,8 +7,8 @@ use std::path::{Component, Path};
 use std::boxed::Box;
 
 use super::filedata::FileDataReader;
-use super::metadata::{self, CachingMetadataReader};
-use super::block::{FragmentBlockCache, MetadataBlockCache, MetadataReader};
+use super::metadata::{self, EntryReference, Inode, MetadataProvider};
+use super::block::{FragmentBlockCache, MetadataReader};
 use super::readermux::{ReaderMux, ReaderClient};
 use super::superblock::Superblock;
 
@@ -17,9 +17,8 @@ use super::superblock::Superblock;
 #[derive(Debug)]
 pub struct SquashFS<R:Read+Seek> {
     reader_mux: Box<ReaderMux<R>>,
-    md_reader: CachingMetadataReader<ReaderClient<R>>,
     frag_cache: FragmentBlockCache<ReaderClient<R>>,
-    metadata_cache: MetadataBlockCache<ReaderClient<R>>,
+    md_provider: MetadataProvider<ReaderClient<R>>,
     sb: Superblock,
     pub(crate) id_table: metadata::IdLookupTable,
 }
@@ -41,10 +40,9 @@ impl<R: Read + Seek> SquashFS<R> {
         let sb = Superblock::read(&mut r)?;
         let id_table = metadata::IdLookupTable::read(&mut r, &sb)?;
         let mut reader_mux = Box::new(ReaderMux::new(r));
-        let md_reader = CachingMetadataReader::new(reader_mux.client(), sb.compressor);
         let frag_cache = FragmentBlockCache::new(reader_mux.client(), sb.compressor);
-        let metadata_cache = MetadataBlockCache::new(reader_mux.client(), sb.compressor);
-        Ok(SquashFS { reader_mux, md_reader, frag_cache, metadata_cache, sb, id_table })
+        let md_provider = MetadataProvider::new(reader_mux.client(), &sb);
+        Ok(SquashFS { reader_mux, frag_cache, md_provider, sb, id_table })
     }
     }
 
@@ -54,8 +52,7 @@ impl<R: Read + Seek> SquashFS<R> {
     where P: AsRef<Path>
     {
         let inode = self.inode_from_path(path)?;
-        let dir_tables = metadata::DirTable::read_for_inode(&mut self.md_reader, &self.sb, &inode)?;
-        Ok(ReadDir::new(dir_tables.into_iter()))
+        self.read_dir_inode(&inode)
     }
 
     /// Retrieve an iterator that walks the dirents within a directory specified by the given
@@ -63,15 +60,17 @@ impl<R: Read + Seek> SquashFS<R> {
     pub fn read_dir_dirent(&mut self, dir_entry: &DirEntry) -> io::Result<ReadDir<std::vec::IntoIter<metadata::DirTable>>>
     {
         let inode = self.inode_from_entryref(dir_entry.inode_ref)?;
-        let dir_tables = metadata::DirTable::read_for_inode(&mut self.md_reader, &self.sb, &inode)?;
-        Ok(ReadDir::new(dir_tables.into_iter()))
+        self.read_dir_inode(&inode)
     }
 
     /// Retrieve an iterator that walks the dirents within a directory specified by the given
     /// Inode.
     pub fn read_dir_inode(&mut self, inode: &metadata::Inode) -> io::Result<ReadDir<std::vec::IntoIter<metadata::DirTable>>>
     {
-        let dir_tables = metadata::DirTable::read_for_inode(&mut self.md_reader, &self.sb, inode)?;
+        // TODO: This method has some redundancy. Look at refactoring read_for_inode
+        let entry_ref = metadata::DirTable::entryref_from_inode(inode)?;
+        let mut reader = self.md_provider.dir_reader(entry_ref)?;
+        let dir_tables = metadata::DirTable::read_for_inode(&mut reader, &inode)?;
         Ok(ReadDir::new(dir_tables.into_iter()))
     }
 
@@ -100,12 +99,14 @@ impl<R: Read + Seek> SquashFS<R> {
 
     /// Retrieve the root Inode of the SquashFS. This corresponds to the '/' directory
     pub fn root_inode(&mut self) -> io::Result<metadata::Inode> {
-        metadata::Inode::read_at_ref(&mut self.md_reader, &self.sb, self.sb.root_inode)
+        let mut reader = self.md_provider.inode_reader(self.sb.root_inode)?;
+        metadata::Inode::read(&mut reader, self.sb.block_size)
     }
 
     /// Retrieve the Inode specified by SquashFS metadata Entry Reference
     pub fn inode_from_entryref(&mut self, inode_ref: metadata::EntryReference) -> io::Result<metadata::Inode> {
-        metadata::Inode::read_at_ref(&mut self.md_reader, &self.sb, inode_ref)
+        let mut reader = self.md_provider.inode_reader(inode_ref)?;
+        metadata::Inode::read(&mut reader, self.sb.block_size)
     }
 
     /// Retreive the Inode specified by the given path

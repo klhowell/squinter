@@ -3,12 +3,12 @@ use std::collections::HashMap;
 use std::fmt::Debug;
 use std::io::{self, Cursor, Read, Seek, SeekFrom};
 use std::ffi::CString;
-use std::mem;
+use std::ops::Range;
 
 use byteorder::{ByteOrder, LittleEndian, ReadBytesExt};
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 
-use super::superblock::{Compressor, Superblock};
+use super::block::{MetadataBlockCache, MetadataReader};
 use super::compressed::CompressedBlockReader;
 
 //let block_count = (item_count + (METADATA_BLOCK_SIZE / I::BYTE_SIZE) as u32 - 1) / (METADATA_BLOCK_SIZE / I::BYTE_SIZE) as u32;
@@ -221,6 +221,67 @@ impl<R: Read + Seek> Seek for MetadataReader<R> {
         } else {
             panic!("seek: not Base reader");
         }
+    }
+}
+*/
+
+#[derive(Debug)]
+pub struct MetadataProvider<R: Read+Seek> {
+    cache: MetadataBlockCache<R>,
+    inode_addrs: Range<u64>,
+    dir_addrs: Range<u64>,
+    frag_addrs: Range<u64>,
+    export_addrs: Range<u64>,
+    id_addrs: Range<u64>,
+    xattr_addrs: Option<Range<u64>>,
+}
+
+impl<R:Read+Seek> MetadataProvider<R> {
+    pub fn new(inner: R, sb: &Superblock) -> Self {
+        let cache = MetadataBlockCache::new(inner, sb.compressor);
+        let inode_addrs = sb.inode_table..sb.dir_table;
+        let dir_addrs = if sb.frag_table != u64::MAX {
+            sb.dir_table..sb.frag_table
+        } else if sb.export_table != u64::MAX {
+            sb.dir_table..sb.export_table
+        } else {
+            sb.dir_table..sb.id_table
+        };
+        let frag_addrs = if sb.export_table != u64::MAX {
+            sb.frag_table..sb.export_table
+        } else {
+            sb.dir_table..sb.id_table
+        };
+        let export_addrs = sb.export_table..sb.id_table;
+        let id_addrs = if sb.xattr_table != u64::MAX {
+            sb.id_table..sb.xattr_table
+        } else {
+            sb.id_table..sb.bytes_used
+        };
+        let xattr_addrs = if sb.xattr_table != u64::MAX {
+            Some(sb.xattr_table..sb.bytes_used)
+        } else {
+            None
+        };
+        MetadataProvider { cache, inode_addrs, dir_addrs, frag_addrs, export_addrs, id_addrs, xattr_addrs }
+    }
+    
+    pub fn inode_reader(&self, entry_ref: EntryReference) -> io::Result<MetadataReader<R>> {
+        MetadataReader::new(
+            &self.cache,
+            self.inode_addrs.start,
+            Some(self.inode_addrs.end),
+            entry_ref,
+        )
+    }
+
+    pub fn dir_reader(&self, entry_ref: EntryReference) -> io::Result<MetadataReader<R>> {
+        MetadataReader::new(
+            &self.cache,
+            self.dir_addrs.start,
+            Some(self.dir_addrs.end),
+            entry_ref,
+        )
     }
 }
 
@@ -782,7 +843,16 @@ impl DirTable {
         })
     }
 
-    pub(crate) fn read_for_inode<R>(r: &mut R, sb: &Superblock, inode: &Inode) -> io::Result<Vec<Self>>
+    pub(crate) fn entryref_from_inode(inode: &Inode) -> io::Result<EntryReference> {
+        let (block_addr, block_offset) = match &inode.extended_info {
+            InodeExtendedInfo::BasicDir(d) => (d.block_index, d.block_offset),
+            InodeExtendedInfo::ExtDir(d) => (d.block_index, d.block_offset),
+            _ => {return Err(io::Error::new(io::ErrorKind::InvalidInput, "Inode is not a directory"))},
+        };
+        Ok(EntryReference::new(block_addr.into(), block_offset))
+    }
+
+    pub(crate) fn read_for_inode<R>(r: &mut MetadataReader<R>, inode: &Inode) -> io::Result<Vec<Self>>
     where R: Read + Seek
     {
         let (block_index, block_offset, file_size) = match &inode.extended_info {
@@ -791,10 +861,7 @@ impl DirTable {
             _ => {return Err(io::Error::new(io::ErrorKind::InvalidInput, "Inode is not a directory"))},
         };
 
-        r.seek(SeekFrom::Start(sb.dir_table + block_index as u64))?;
-        //let mut reader = MetadataReader::new(r, sb.compressor);
-        io::copy(&mut r.by_ref().take(block_offset.into()), &mut io::sink())?;
-
+        r.seek_ref(EntryReference::new(block_index.into(), block_offset))?;
         let mut reader = r.take((file_size-3).into());
 
         let mut tables = Vec::new();

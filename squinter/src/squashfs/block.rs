@@ -189,7 +189,7 @@ impl<R:Read+Seek> MetadataBlockCache<R> {
     // Create and return a new MetadataBlockReader over the metadata block at the specified
     // address, creating a new caching ReaderMux to back it if necessary. This Reader only spans a
     // single block and will not automatically roll into the next block.
-    pub fn get_block_reader(&self, block_addr: u64)
+    fn get_block_reader(&self, block_addr: u64)
         -> io::Result<MetadataBlockReader<ReaderClient<R>>>
     {
         let mut block_readers = self.block_readers.borrow_mut();
@@ -229,8 +229,6 @@ impl<R:Read+Seek> MetadataBlockReaderMux<R> {
         let block_size: u16 = header & 0x7FFF;
         let compressed: bool = header & 0x8000 == 0;
         
-        println!("Opening new block @{} -- size:{}", block_addr, block_size);
-
         if block_size > METADATA_UNCOMPRESSED_BLOCK_SIZE {
             eprintln!("Metadata block size too big -- {}", block_size);
             return Err(io::Error::from(io::ErrorKind::InvalidData));
@@ -305,23 +303,25 @@ impl<R:Read+Seek> Seek for MetadataBlockReader<R> {
 pub struct MetadataReader<'a, R:Read+Seek> {
     cache: &'a MetadataBlockCache<R>,
     inner: MetadataBlockReader<ReaderClient<R>>,
-    end_addr: Option<u64>,
+    section_start: u64,
+    section_end: Option<u64>,
 }
 
 impl<'a, R:Read+Seek> MetadataReader<'a, R> {
-    pub fn new(cache: &'a MetadataBlockCache<R>, addr: EntryReference, end_addr: Option<u64>) -> io::Result<Self> {
-        let mut inner = cache.get_block_reader(addr.location())?;
-        inner.seek(SeekFrom::Current(addr.offset().into()))?;
+    pub fn new(cache: &'a MetadataBlockCache<R>, section_start: u64, section_end: Option<u64>, entry_addr: EntryReference) -> io::Result<Self> {
+        let mut inner = cache.get_block_reader(section_start + entry_addr.location())?;
+        inner.seek(SeekFrom::Current(entry_addr.offset().into()))?;
         Ok(Self {
             cache,
             inner,
-            end_addr,
+            section_start,
+            section_end,
         })
     }
     
     pub fn seek_ref(&mut self, addr: EntryReference) -> io::Result<()> {
-        if addr.location() != self.inner.block_addr() {
-            self.inner = self.cache.get_block_reader(addr.location())?;
+        if self.section_start + addr.location() != self.inner.block_addr() {
+            self.inner = self.cache.get_block_reader(self.section_start + addr.location())?;
         }
         self.inner.seek(SeekFrom::Start(addr.offset().into()))?;
         Ok(())
@@ -333,7 +333,7 @@ impl<'a, R:Read+Seek> Read for MetadataReader<'a, R> {
         let size = self.inner.read(buf)?;
         if size == 0 && buf.len() != 0 {
             // This must be the end of the block. Potentially start a new one.
-            let done = self.end_addr.is_some_and(|x| x <= self.inner.next_block_addr());
+            let done = self.section_end.is_some_and(|x| x <= self.inner.next_block_addr());
             if done {
                 Ok(0)
             } else {
