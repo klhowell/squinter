@@ -72,6 +72,9 @@ pub struct FragmentBlockCache<R: Read+Seek> {
 }
 
 impl<R:Read+Seek> FragmentBlockCache<R> {
+    /// Create a new instance of the cache, backed by the provided reader for compressed blocks.
+    /// All blocks are expected to be either uncompressed or compressed with the specified
+    /// compressor.
     pub fn new(inner: R, compressor: Compressor) -> Self {
         Self {
             inner: ReaderMux::new(inner),
@@ -80,13 +83,15 @@ impl<R:Read+Seek> FragmentBlockCache<R> {
         }
     }
 
+    /// Create a new FragmentReader that is backed by this cache. The new reader will be limited to
+    /// only read the portion of the block specified by offset and len.
     pub fn get_fragment_reader(&mut self, block_addr: u64, block_size: u64, block_uncompressed_size: u64, offset: u64, len: u64)
         -> io::Result<FragmentReader<ReaderClient<CachingReader<CompressedBlockReader<ReaderClient<R>>>>>>
     {
         let block_reader = self.get_or_create_block_reader(block_addr, block_size, block_uncompressed_size)?;
         FragmentReader::new(block_reader.client(), offset, len)
     }
-
+    
     /// Create and return a new CompressedBlockReader for the specified block in the backing reader
     fn get_or_create_block_reader(&mut self, block_addr: u64, block_size: u64, uncompressed_size: u64)
         -> io::Result<&mut ReaderMux<CachingReader<CompressedBlockReader<ReaderClient<R>>>>>
@@ -124,6 +129,7 @@ pub struct FragmentReader<R> {
 }
 
 impl<R:Read+Seek> FragmentReader<R> {
+    /// Create a new FragmentReader over the specified portion of the provided FragmentBlock reader
     pub fn new(mut inner: R, offset: u64, len: u64) -> io::Result<Self> {
         inner.seek(SeekFrom::Start(offset))?;
         Ok(Self {
@@ -188,6 +194,9 @@ pub struct MetadataBlockCache<R: Read+Seek> {
 }
 
 impl<R:Read+Seek> MetadataBlockCache<R> {
+    
+    /// Create a new MetadataBlockCache backed by the specified reader. Any compressed blocks will
+    /// use the specified compressor.
     pub fn new(inner: R, compressor: Compressor) -> Self {
         Self {
             inner: RefCell::new(ReaderMux::new(inner)),
@@ -220,6 +229,10 @@ impl<R:Read+Seek> MetadataBlockCache<R> {
     }
 }
 
+/// A reader mux allowing multiple clients to share access to a single metadata block.
+/// The MetadataBlockReaderMux is given a backing reader into the raw compressed metadata region,
+/// and it handles decompressing and caching the data, providing access to the uncompressed data
+/// for downstream clients.
 #[derive(Debug)]
 struct MetadataBlockReaderMux<R:Read+Seek> {
     inner: ReaderMux<CachingReader<CompressedBlockReader<R>>>,
@@ -268,6 +281,8 @@ impl<R:Read+Seek> MetadataBlockReaderMux<R> {
     }
 }
 
+/// A reader for a shared metadata block. The MetadataBlockReader is obtained by calling the
+/// client() function on a MetadataBlockReaderMux
 #[derive(Debug)]
 pub struct MetadataBlockReader<R:Read+Seek> {
     inner: ReaderClient<CachingReader<CompressedBlockReader<R>>>,
@@ -288,6 +303,7 @@ impl<R:Read+Seek> MetadataBlockReader<R> {
         self.block_addr
     }
     
+    #[allow(dead_code)]
     pub fn block_size(&self) -> u16 {
         self.block_size
     }
@@ -310,6 +326,11 @@ impl<R:Read+Seek> Seek for MetadataBlockReader<R> {
     }
 }
 
+/// A reader over an entire metadata section of the SquashFS, backed by a MetadataBlockCache.
+/// The MetadataReader supports Seek for navigating within the current block, and reads will
+/// naturally advance to the next block when the end of the current block is reached. To manually
+/// navigate to a different metadata block, the seek_ref() function can be used with an
+/// EntryReference.
 pub struct MetadataReader<'a, R:Read+Seek> {
     cache: &'a MetadataBlockCache<R>,
     inner: MetadataBlockReader<ReaderClient<R>>,

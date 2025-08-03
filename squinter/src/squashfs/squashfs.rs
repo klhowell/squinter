@@ -7,8 +7,8 @@ use std::path::{Component, Path};
 use std::boxed::Box;
 
 use super::filedata::FileDataReader;
-use super::metadata::{self, EntryReference, Inode, MetadataProvider};
-use super::block::{FragmentBlockCache, MetadataReader};
+use super::metadata::{self, MetadataProvider};
+use super::block::FragmentBlockCache;
 use super::readermux::{ReaderMux, ReaderClient};
 use super::superblock::Superblock;
 

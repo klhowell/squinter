@@ -53,6 +53,7 @@ pub(crate) fn read_metadata_block<R>(r: &mut R, c: &Compressor, buf: &mut [u8]) 
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub struct MetadataProvider<R: Read+Seek> {
     cache: MetadataBlockCache<R>,
     inode_addrs: Range<u64>,
