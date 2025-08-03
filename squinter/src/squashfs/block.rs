@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::cmp;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::io::{self, Cursor, Read, Seek, SeekFrom};
 
 use byteorder::{LittleEndian, ReadBytesExt};
@@ -82,23 +83,32 @@ impl<R:Read+Seek> FragmentBlockCache<R> {
     pub fn get_fragment_reader(&mut self, block_addr: u64, block_size: u64, block_uncompressed_size: u64, offset: u64, len: u64)
         -> io::Result<FragmentReader<ReaderClient<CachingReader<CompressedBlockReader<ReaderClient<R>>>>>>
     {
-        let block_reader = match self.block_readers.get_mut(&block_addr) {
-            Some(r) => r,
-            None => {
-                let r = self.create_block_reader(block_addr, block_size, block_uncompressed_size)?;
-                self.block_readers.insert(block_addr, r);
-                self.block_readers.get_mut(&block_addr).unwrap()
-            },
-        };
+        let block_reader = self.get_or_create_block_reader(block_addr, block_size, block_uncompressed_size)?;
         FragmentReader::new(block_reader.client(), offset, len)
     }
 
-    fn create_block_reader(&mut self, block_addr: u64, block_size: u64, uncompressed_size: u64)
+    /// Create and return a new CompressedBlockReader for the specified block in the backing reader
+    fn get_or_create_block_reader(&mut self, block_addr: u64, block_size: u64, uncompressed_size: u64)
+        -> io::Result<&mut ReaderMux<CachingReader<CompressedBlockReader<ReaderClient<R>>>>>
+    {
+        match self.block_readers.entry(block_addr) {
+            Entry::Occupied(e) => {
+                Ok(e.into_mut())
+            }
+            Entry::Vacant(e) => {
+                let r = Self::create_block_reader(&mut self.inner, self.compressor, block_addr, block_size, uncompressed_size)?;
+                Ok(e.insert(r))
+            }
+        }
+    }
+
+    /// Create and return a new CompressedBlockReader for the specified block in the backing reader
+    fn create_block_reader(reader_mux: &mut ReaderMux<R>, compressor: Compressor, block_addr: u64, block_size: u64, uncompressed_size: u64)
         -> io::Result<ReaderMux<CachingReader<CompressedBlockReader<ReaderClient<R>>>>>
     {
-        let mut client_reader = self.inner.client();
+        let mut client_reader = reader_mux.client();
         client_reader.seek(SeekFrom::Start(block_addr))?;
-        let compressed_reader = CompressedBlockReader::new(client_reader, self.compressor, block_size, uncompressed_size)?;
+        let compressed_reader = CompressedBlockReader::new(client_reader, compressor, block_size, uncompressed_size)?;
         let caching_reader = CachingReader::new_with_capacity(compressed_reader, uncompressed_size as usize);
         Ok(ReaderMux::new(caching_reader))
     }
@@ -193,18 +203,18 @@ impl<R:Read+Seek> MetadataBlockCache<R> {
         -> io::Result<MetadataBlockReader<ReaderClient<R>>>
     {
         let mut block_readers = self.block_readers.borrow_mut();
-        let block_reader_mux = match block_readers.get_mut(&block_addr) {
-            Some(r) => r,
-            None => {
-                //let r = self.create_block_reader(block_addr)?;
+        let block_reader_mux = match block_readers.entry(block_addr) {
+            Entry::Occupied(e) => {
+                e.into_mut()
+            }
+            Entry::Vacant(e) => {
                 let r = MetadataBlockReaderMux::new(
                     self.inner.borrow_mut().client(),
                     block_addr,
                     self.compressor,
                 )?;
-                block_readers.insert(block_addr, r);
-                block_readers.get_mut(&block_addr).unwrap()
-            },
+                e.insert(r)
+            }
         };
         Ok(block_reader_mux.client())
     }
