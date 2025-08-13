@@ -11,8 +11,6 @@ use super::block::{MetadataBlockCache, MetadataReader};
 use super::compressed::CompressedBlockReader;
 use super::superblock::{Compressor, Superblock};
 
-//let block_count = (item_count + (METADATA_BLOCK_SIZE / I::BYTE_SIZE) as u32 - 1) / (METADATA_BLOCK_SIZE / I::BYTE_SIZE) as u32;
-
 // Divide x by y, rounding up any fractional result
 macro_rules! div_ceil {
     ($x:expr, $y:expr) => { ($x + $y - 1) / $y }
@@ -52,6 +50,9 @@ pub(crate) fn read_metadata_block<R>(r: &mut R, c: &Compressor, buf: &mut [u8]) 
     Ok(((size as usize) + 2, total as usize))
 }
 
+/// The MetadataProvider hosts a cache of metadata blocks and provides functions to retrieve
+/// readers for the various metadata sections. MetadataReaders provided by this structure's
+/// methods are backed by the cache.
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct MetadataProvider<R: Read+Seek> {
@@ -65,6 +66,9 @@ pub struct MetadataProvider<R: Read+Seek> {
 }
 
 impl<R:Read+Seek> MetadataProvider<R> {
+    
+    /// Create a new MetadataProvider from a reader over the SquashFS archive and a Superblock
+    /// describing the layout of that archive.
     pub fn new(inner: R, sb: &Superblock) -> Self {
         let cache = MetadataBlockCache::new(inner, sb.compressor);
         let inode_addrs = sb.inode_table..sb.dir_table;
@@ -94,6 +98,8 @@ impl<R:Read+Seek> MetadataProvider<R> {
         MetadataProvider { cache, inode_addrs, dir_addrs, frag_addrs, export_addrs, id_addrs, xattr_addrs }
     }
     
+    /// Retrieve a MetadataReader with access to the entire range of the inner reader. The reader
+    /// is initialized to point to the location specified by entry_ref.
     pub fn archive_reader(&self, entry_ref: EntryReference) -> io::Result<MetadataReader<R>> {
         MetadataReader::new(
             &self.cache,
@@ -103,6 +109,8 @@ impl<R:Read+Seek> MetadataProvider<R> {
         )
     }
 
+    /// Retrieve a MetadataReader with access to the Inode portion of the inner reader. The reader
+    /// is initialized to point to the location specified by entry_ref.
     pub fn inode_reader(&self, entry_ref: EntryReference) -> io::Result<MetadataReader<R>> {
         MetadataReader::new(
             &self.cache,
@@ -112,6 +120,8 @@ impl<R:Read+Seek> MetadataProvider<R> {
         )
     }
 
+    /// Retrieve a MetadataReader with access to the Directory portion of the inner reader. The reader
+    /// is initialized to point to the location specified by entry_ref.
     pub fn dir_reader(&self, entry_ref: EntryReference) -> io::Result<MetadataReader<R>> {
         MetadataReader::new(
             &self.cache,
@@ -223,6 +233,15 @@ impl FromBytes for ExtendedAttributeLookupEntry {
     }
 }
 
+/// SquashFS uses lookup tables to find several types of metadata structures. Since the size of any
+/// given compressed metadata block is unknown, the lookup table stores a list of disk offsets to
+/// find each metadata block for a given structure. This way, a reader that is looking for a
+/// specific metadata entry does not need to read and iterate through the entire list of entries.
+/// Instead, they can use the lookup table to find which block contains the entry of interest, and
+/// decompress only that one block. The list of block locations is stored uncompressed.
+/// 
+/// Since the entry sizes are not stored in the lookup table, the referenced metadata entries must
+/// all be a fixed size, allowing the block number and offset to be calculated from the entry index.
 #[derive(Debug)]
 pub(crate) struct LookupTable<I: FromBytes> {
     pub block_offsets: Vec<u64>,
@@ -230,6 +249,8 @@ pub(crate) struct LookupTable<I: FromBytes> {
 }
 
 impl<I: FromBytes> LookupTable<I> {
+    
+    /// Read and store all of the entries in a lookup table and return them in a LookupTable struct.
     fn read<R>(r: &mut R, table_offset: u64, item_count: u32, compressor: &Compressor) -> io::Result<Self>
     where R: Read + Seek
     {
@@ -246,7 +267,6 @@ impl<I: FromBytes> LookupTable<I> {
         }
 
         // Parse the metadata blocks into entries
-        // TODO: Handle entries that cross block boundaries (is this possible?)
         let mut buf: [u8; 8192] = [0; 8192];
         let mut size = 0;
         let mut data = &buf[0..size];
@@ -300,10 +320,12 @@ impl FromBytes for FragmentEntry {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub(crate) struct FragmentLookupTable {
     pub lu_table: LookupTable<FragmentEntry>,
 }
 
+#[allow(dead_code)]
 impl FragmentLookupTable {
     pub fn read<R>(r: &mut R, sb: &Superblock) -> io::Result<Self>
     where R: Read + Seek
